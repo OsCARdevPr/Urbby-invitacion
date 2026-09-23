@@ -1,0 +1,55 @@
+{
+  "name": "urbby-invitaciones",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Invitaciones con QR para eventos de Urbby: importa invitados desde Excel, envía por correo y WhatsApp (Evolution API) y registra el ingreso escaneando el QR.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,yellow \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch --env-file-if-exists=.env src/server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build && tsup",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "better-sqlite3": "^13.0.3",
+    "exceljs": "^4.4.0",
+    "hono": "^4.13.8",
+    "libphonenumber-js": "^1.13.13",
+    "nanoid": "^6.0.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "resend": "^6.28.1",
+    "satori": "^0.33.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@fontsource/archivo": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.4",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "lucide-react": "^1.47.0",
+    "qr-scanner": "^1.4.2",
+    "react-router": "^7.18.4",
+    "tailwindcss": "^4.3.3",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

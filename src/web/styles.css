@@ -1,0 +1,142 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens del panel. Las utilidades de Tailwind apuntan a variables, así que el modo oscuro
+ * solo cambia valores: ningún componente necesita variantes dark:.
+ * Navy es la base; el amarillo de Urbby es el único acento y se reserva para la acción principal.
+ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-mute: var(--ink-mute);
+  --color-navy: var(--navy);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+
+  --font-display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface-2: #eef2f8;
+  --line: #dde4ef;
+  --ink: #0b1b3f;
+  --ink-soft: #3a4a6b;
+  --ink-mute: #66769a;
+  --navy: #021d59;
+  --brand: #fab822;
+  --brand-ink: #021d59;
+  --ok: #0f7a4a;
+  --ok-bg: #e2f4ea;
+  --warn: #8f5b00;
+  --warn-bg: #fff2d4;
+  --bad: #b42318;
+  --bad-bg: #fde7e5;
+  --info: #1f4fa3;
+  --info-bg: #e5edfb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #030f2e;
+    --surface: #0a1a44;
+    --surface-2: #102455;
+    --line: #1d346b;
+    --ink: #e8edf7;
+    --ink-soft: #c6d4ec;
+    --ink-mute: #8ea2c8;
+    --navy: #010f33;
+    --ok: #5ad69a;
+    --ok-bg: rgb(90 214 154 / 0.13);
+    --warn: #fcc85a;
+    --warn-bg: rgb(252 200 90 / 0.13);
+    --bad: #ff8a80;
+    --bad-bg: rgb(255 138 128 / 0.13);
+    --info: #8fb4ff;
+    --info-bg: rgb(143 180 255 / 0.13);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #030f2e;
+  --surface: #0a1a44;
+  --surface-2: #102455;
+  --line: #1d346b;
+  --ink: #e8edf7;
+  --ink-soft: #c6d4ec;
+  --ink-mute: #8ea2c8;
+  --navy: #010f33;
+  --ok: #5ad69a;
+  --ok-bg: rgb(90 214 154 / 0.13);
+  --warn: #fcc85a;
+  --warn-bg: rgb(252 200 90 / 0.13);
+  --bad: #ff8a80;
+  --bad-bg: rgb(255 138 128 / 0.13);
+  --info: #8fb4ff;
+  --info-bg: rgb(143 180 255 / 0.13);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    font-size: 16px;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* evita el zoom de iOS al enfocar */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes rise {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.animate-rise {
+  animation: rise 180ms ease-out;
+}
