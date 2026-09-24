@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { normalizePhone, formatPhone } from '../src/server/services/phone';
-import { formatDate, formatTime, renderTemplate, templateVars } from '../src/shared/template';
-import { validateRows, type RawRow } from '../src/server/services/excel';
+import { DEFAULT_WA_TEMPLATE, formatDate, formatTime, renderTemplate, templateVars } from '../src/shared/template';
+import { waToHtml } from '../src/server/services/email';
+import { decodeText, parseCsv, readGuestsFile, tidyName, validateRows, type RawRow } from '../src/server/services/excel';
 import { DEFAULT_SETTINGS, INITIAL_STATE, gateReason, inWindow, localParts, nextDelay, validateSettings } from '../src/server/worker/pacing';
 import { extractText, isConfirmation, mapAck, phonesFromKey } from '../src/server/services/webhook';
 import { guestsToVcf } from '../src/server/services/vcf';
@@ -38,22 +39,81 @@ describe('normalizePhone', () => {
 });
 
 describe('plantillas', () => {
-  const event = { name: 'Prelaunch Urbby', date: '2026-10-10', time: '19:30', venue: 'Hotel', address: 'Col. Escalón' };
+  const event = {
+    name: 'Pre-lanzamiento Urbby App',
+    date: '2026-10-10',
+    time: '17:30',
+    venue: 'Urbby Hub',
+    address: 'Col. Escalón',
+    dress_code: 'Business Casual',
+    maps_url: '',
+  };
 
-  it('formatea fecha y hora en español', () => {
+  it('formatea fecha y hora como en la invitación', () => {
     expect(formatDate('2026-10-10')).toMatch(/s[áa]bado.*10.*octubre/i);
-    expect(formatTime('19:30')).toBe('7:30 p. m.');
-    expect(formatTime('00:05')).toBe('12:05 a. m.');
-    expect(formatTime('12:00')).toBe('12:00 p. m.');
+    expect(formatTime('17:30')).toBe('5:30 PM');
+    expect(formatTime('00:05')).toBe('12:05 AM');
+    expect(formatTime('12:00')).toBe('12:00 PM');
+  });
+
+  it('el texto por defecto lleva todo lo de la invitación y ningún enlace', () => {
+    const text = renderTemplate(DEFAULT_WA_TEMPLATE, templateVars(event, { name: 'Ana López', business: 'Café Central' }));
+    expect(text).toContain('¡Hola Ana López!');
+    expect(text).toContain('50 seleccionados');
+    expect(text).toContain('*Lugar:* Urbby Hub');
+    expect(text).toContain('*Hora:* 5:30 PM');
+    expect(text).toContain('*Dress code:* Business Casual');
+    expect(text).toContain('válida para una persona');
+    expect(text).not.toMatch(/\{\w+\}|https?:/);
+  });
+
+  it('el correo convierte el formato de WhatsApp y escapa HTML', () => {
+    expect(waToHtml('*Hola* <b>\nhttps://maps.app.goo.gl/x?a=1&b=2')).toBe(
+      '<strong>Hola</strong> &lt;b&gt;<br><a href="https://maps.app.goo.gl/x?a=1&amp;b=2" style="color:#1F4FA3">https://maps.app.goo.gl/x?a=1&amp;b=2</a>',
+    );
   });
 
   it('reemplaza los placeholders y deja los desconocidos a la vista', () => {
     const vars = templateVars(event, { name: 'Ana María López', business: 'Café Central' });
-    expect(renderTemplate('Hola {primer_nombre} de {negocio} en {lugar} {x}', vars)).toBe('Hola Ana de Café Central en Hotel {x}');
+    expect(renderTemplate('Hola {primer_nombre} de {negocio} en {lugar} {x}', vars)).toBe('Hola Ana de Café Central en Urbby Hub {x}');
   });
 
   it('sin negocio, {negocio} usa el nombre', () => {
     expect(templateVars(event, { name: 'Ana', business: '' }).negocio).toBe('Ana');
+  });
+});
+
+describe('lectura de CSV', () => {
+  it('lee el formato del registro (con columnas extra, comas y caracteres invisibles)', async () => {
+    const csv =
+      '﻿#,Fecha de registro,Nombre,Negocio,Correo,Teléfono,Confirmaciones\n' +
+      '1,22/09/2026 9:29 a.m.,Ana López,"Café, Pan y Más",ana@example.com,+503 7528-3037,\n' +
+      '2,,GENESIS DE CARCAMO,GIGI SV,,+503 ‪7840-0819‬,\n';
+    const rows = await readGuestsFile(new TextEncoder().encode(csv).buffer as ArrayBuffer);
+    expect(rows).toEqual([
+      { row: 2, name: 'Ana López', business: 'Café, Pan y Más', phone: '+503 7528-3037', email: 'ana@example.com' },
+      { row: 3, name: 'Genesis de Carcamo', business: 'GIGI SV', phone: '+503 ‪7840-0819‬', email: '' },
+    ]);
+    expect(normalizePhone(rows[1].phone)).toEqual({ ok: true, phone: '50378400819' });
+  });
+
+  it('detecta punto y coma y comillas escapadas', () => {
+    expect(parseCsv('Nombre;Negocio\r\n"Pedro ""El Rey""";Tienda\r\n')).toEqual([
+      ['Nombre', 'Negocio'],
+      ['Pedro "El Rey"', 'Tienda'],
+    ]);
+  });
+
+  it('decodifica CSV de Excel en Windows-1252', () => {
+    expect(decodeText(new Uint8Array([0x4a, 0x6f, 0x73, 0xe9]))).toBe('José');
+  });
+
+  it('ordena mayúsculas solo si el nombre viene todo en mayúsculas o minúsculas', () => {
+    expect(tidyName('GENESIS GEORGINA DE CARCAMO')).toBe('Genesis Georgina de Carcamo');
+    expect(tidyName('danir arias')).toBe('Danir Arias');
+    expect(tidyName('Carlos Hernandez.')).toBe('Carlos Hernandez');
+    expect(tidyName('Glendy Zuleyma campos')).toBe('Glendy Zuleyma campos');
+    expect(tidyName('maría-josé del carmen')).toBe('María-José del Carmen');
   });
 });
 

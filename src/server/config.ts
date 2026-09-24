@@ -6,7 +6,9 @@ const isProd = process.env.NODE_ENV === 'production';
 
 export const config = {
   isProd,
-  port: Number(env('PORT', '3000')),
+  // API_PORT gana sobre PORT: en desarrollo algunas herramientas definen PORT para Vite (5173)
+  // y la API tiene que seguir en el 3000, que es a donde apunta el proxy de Vite.
+  port: Number(env('API_PORT') || env('PORT', '3000')),
   dataDir: path.resolve(env('DATA_DIR', './data')),
   assetsDir: path.resolve('assets'),
   webDir: path.resolve('dist/web'),
@@ -36,6 +38,22 @@ export const evolutionConfigured = () =>
   Boolean(config.evolution.url && config.evolution.apiKey && config.evolution.instance);
 
 export const resendConfigured = () => Boolean(config.resend.apiKey);
+
+/**
+ * El QR de cada invitación lleva PUBLIC_BASE_URL. Si apunta a esta PC (desarrollo), las invitaciones
+ * no servirían en la puerta: los envíos masivos se bloquean y solo se permiten pruebas individuales.
+ */
+export const publicUrlIsLocal = () => {
+  try {
+    return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(config.publicBaseUrl).hostname);
+  } catch {
+    return true;
+  }
+};
+
+export const LOCAL_URL_BLOCK =
+  'PUBLIC_BASE_URL apunta a localhost: el QR de las invitaciones no serviría en la puerta. ' +
+  'Los envíos masivos solo funcionan con la URL pública; para probar, envía a un invitado de prueba desde su ficha.';
 
 /** Falla al arrancar si faltan los secretos imprescindibles, en vez de quedar abierto. */
 export function assertConfig() {

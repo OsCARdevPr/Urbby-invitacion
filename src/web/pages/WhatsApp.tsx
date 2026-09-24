@@ -67,6 +67,11 @@ export function WhatsApp() {
     <>
       <PageHeader title="Campaña de WhatsApp" subtitle="Una sola cola para todos los eventos, porque todo sale del mismo número." />
 
+      {config.localUrl ? (
+        <div className="mb-6">
+          <Notice tone="warn">Estás en desarrollo: el QR de las invitaciones apunta a localhost, así que la campaña no se puede iniciar.</Notice>
+        </div>
+      ) : null}
       {!config.evolutionConfigured ? (
         <div className="mb-6">
           <Notice tone="bad">Evolution API no está configurada. Define EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE en el servidor.</Notice>
@@ -101,7 +106,7 @@ export function WhatsApp() {
                   icon={<Play className="size-4" />}
                   onClick={() => void start()}
                   loading={busy === 'start'}
-                  disabled={!s.queued || !config.evolutionConfigured}
+                  disabled={!s.queued || !config.evolutionConfigured || config.localUrl}
                 >
                   {s.queued > 0 && s.state.lastSendAt && !s.state.pauseReason?.startsWith('Terminado') ? 'Reanudar' : 'Empezar'}
                 </Button>

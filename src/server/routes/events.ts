@@ -8,7 +8,7 @@ import { config } from '../config';
 import { db, eventStats, getEvent, listGuests, normalizeStats, nowIso } from '../db';
 import type { EventRow } from '../../shared/types';
 import { renderCardPng } from '../services/card';
-import { readGuestsXlsx, validateRows } from '../services/excel';
+import { readGuestsFile, validateRows } from '../services/excel';
 import { guestsToVcf } from '../services/vcf';
 import { startEmailJob } from '../worker/emailJob';
 import { enqueueEvent } from '../worker/whatsappQueue';
@@ -22,7 +22,14 @@ export const eventSchema = z.object({
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Elige la hora'),
   venue: z.string().trim().min(1, 'Escribe el lugar').max(120, 'El lugar es muy largo'),
   address: z.string().trim().max(200).default(''),
-  wa_template: z.string().trim().min(1, 'Escribe el mensaje de WhatsApp').max(1500, 'El mensaje de WhatsApp es muy largo'),
+  dress_code: z.string().trim().max(60, 'El dress code es muy largo').default(''),
+  maps_url: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((v) => v === '' || /^https:\/\/\S+$/.test(v), 'El link de Google Maps debe empezar con https://')
+    .default(''),
+  wa_template: z.string().trim().min(1, 'Escribe el texto de la invitación').max(1500, 'El texto de la invitación es muy largo'),
   email_subject: z.string().trim().min(1, 'Escribe el asunto del correo').max(150),
 });
 
@@ -61,10 +68,10 @@ export const eventRoutes = new Hono<AppEnv>()
     const e = parsed.data;
     const { lastInsertRowid } = db
       .prepare(
-        `INSERT INTO events (name, date, time, venue, address, wa_template, email_subject, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO events (name, date, time, venue, address, dress_code, maps_url, wa_template, email_subject, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(e.name, e.date, e.time, e.venue, e.address, e.wa_template, e.email_subject, nowIso());
+      .run(e.name, e.date, e.time, e.venue, e.address, e.dress_code, e.maps_url, e.wa_template, e.email_subject, nowIso());
     return c.json(getEvent(Number(lastInsertRowid)), 201);
   })
 
@@ -81,8 +88,9 @@ export const eventRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: firstError(parsed.error) }, 400);
     const e = parsed.data;
     db.prepare(
-      `UPDATE events SET name = ?, date = ?, time = ?, venue = ?, address = ?, wa_template = ?, email_subject = ? WHERE id = ?`,
-    ).run(e.name, e.date, e.time, e.venue, e.address, e.wa_template, e.email_subject, id);
+      `UPDATE events SET name = ?, date = ?, time = ?, venue = ?, address = ?, dress_code = ?, maps_url = ?,
+         wa_template = ?, email_subject = ? WHERE id = ?`,
+    ).run(e.name, e.date, e.time, e.venue, e.address, e.dress_code, e.maps_url, e.wa_template, e.email_subject, id);
     return c.json(getEvent(id));
   })
 
@@ -103,10 +111,10 @@ export const eventRoutes = new Hono<AppEnv>()
     if (!getEvent(id)) return c.json({ error: 'Evento no encontrado' }, 404);
     const form = await c.req.formData().catch(() => null);
     const file = form?.get('file');
-    if (!(file instanceof File)) return c.json({ error: 'Sube un archivo .xlsx' }, 400);
+    if (!(file instanceof File)) return c.json({ error: 'Sube un archivo Excel (.xlsx) o CSV' }, 400);
     if (file.size > 5 * 1024 * 1024) return c.json({ error: 'El archivo pesa más de 5 MB' }, 400);
     try {
-      const raw = await readGuestsXlsx(await file.arrayBuffer());
+      const raw = await readGuestsFile(await file.arrayBuffer());
       return c.json({ rows: validateRows(raw, existingContacts(id)) });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
@@ -169,6 +177,7 @@ export const eventRoutes = new Hono<AppEnv>()
         date: str(body.date, new Date().toISOString().slice(0, 10)),
         time: str(body.time, '19:00'),
         venue: str(body.venue, 'Lugar del evento'),
+        dress_code: typeof body.dress_code === 'string' ? body.dress_code.trim() : '',
       },
       { name: str(body.guestName, 'María José Hernández'), business: str(body.guestBusiness, 'Pupusería La Esquina'), token: 'vista-previa' },
     );

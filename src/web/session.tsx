@@ -6,9 +6,15 @@ export interface AppConfig {
   evolutionConfigured: boolean;
   resendConfigured: boolean;
   publicBaseUrl: string;
+  /** El QR apunta a localhost (desarrollo): los envíos masivos están bloqueados. */
+  localUrl: boolean;
   senderPhoneDisplay: string;
   webhookUrl: string | null;
-  defaults: { waTemplate: string; emailSubject: string };
+  defaults: {
+    waTemplate: string;
+    emailSubject: string;
+    event: { name: string; time: string; venue: string; dress_code: string };
+  };
   placeholders: string[];
 }
 

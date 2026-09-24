@@ -16,8 +16,10 @@ Todo corre en **un solo contenedor**.
 
 1. **Crea el evento** en *Eventos → Nuevo evento*. Lleva nombre, fecha, hora, lugar y el mensaje de WhatsApp. La tarjeta y el
    mensaje se previsualizan en vivo.
-2. **Importa el Excel.** Tiene que traer los encabezados `Nombre`, `Negocio`, `Teléfono` y `Correo`, pero pueden estar en
-   cualquier fila de las primeras 10.
+2. **Importa la lista** (Excel `.xlsx` o CSV) desde el detalle del evento → *Importar lista*. Tiene que traer los encabezados
+   `Nombre`, `Negocio`, `Teléfono` y `Correo`, en cualquiera de las primeras 10 filas; otras columnas se ignoran. Hay un
+   ejemplo del formato en [`ejemplos/invitados-ejemplo.csv`](ejemplos/invitados-ejemplo.csv).
+   - Los nombres escritos TODO EN MAYÚSCULAS o todo en minúsculas se ordenan ("GENESIS DE CARCAMO" → "Genesis de Carcamo").
    - Antes de guardar ves una vista previa con las filas listas, con aviso, repetidas o con error.
    - Los teléfonos de 8 dígitos se asumen de El Salvador (+503).
 3. **Descarga los contactos (.vcf)** e impórtalos en el teléfono del número secundario (ver abajo).
@@ -88,12 +90,8 @@ La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa l
 
 ## Despliegue en Dokploy
 
-1. **Sube el proyecto a GitHub** (repositorio privado):
-   ```bash
-   git init && git add . && git commit -m "Invitaciones Urbby"
-   git remote add origin git@github.com:<tu-usuario>/urbby-invitaciones.git
-   git push -u origin main
-   ```
+1. El código vive en **https://github.com/OsCARdevPr/Urbby-invitacion** (rama `main`). No subas nunca la lista real de
+   invitados ni el `.env`: tienen datos personales y claves (el `.gitignore` ya los excluye).
 2. En Dokploy crea una **Application**:
    - *Source:* el repositorio de GitHub, rama `main`.
    - *Build type:* **Dockerfile**.
@@ -113,6 +111,9 @@ La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa l
    - En el DNS de urbby.app crea un registro **A** `invitaciones` → IP del VPS.
 6. **Deploy.** Luego entra al panel → *WhatsApp* → **Configurar en Evolution**, que apunta el webhook de la instancia a la
    app. Hazlo **después** de tener el dominio con HTTPS.
+
+> Mientras `PUBLIC_BASE_URL` apunte a `localhost` (desarrollo), los envíos masivos de correo y WhatsApp están bloqueados:
+> esas invitaciones no servirían en la puerta. Sí se puede enviar a un invitado puntual desde su ficha, para probar.
 
 > ⚠️ `PUBLIC_BASE_URL` es la URL que va dentro de cada QR. Defínela bien **antes** de enviar invitaciones: si la cambias
 > después, los QR ya enviados apuntarán a la URL vieja. Aun así se podrán escanear, porque el escáner solo lee el código

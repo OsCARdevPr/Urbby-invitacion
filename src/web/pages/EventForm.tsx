@@ -8,7 +8,7 @@ import { useSession } from '../session';
 import type { EventRow } from '../../shared/types';
 import { renderTemplate, templateVars } from '../../shared/template';
 
-type Form = Pick<EventRow, 'name' | 'date' | 'time' | 'venue' | 'address' | 'wa_template' | 'email_subject'>;
+type Form = Pick<EventRow, 'name' | 'date' | 'time' | 'venue' | 'address' | 'dress_code' | 'maps_url' | 'wa_template' | 'email_subject'>;
 
 const SAMPLE_GUEST = { name: 'María José Hernández', business: 'Pupusería La Esquina' };
 
@@ -24,11 +24,10 @@ export function EventForm() {
     editing
       ? null
       : {
-          name: 'Prelaunch Urbby',
+          ...config.defaults.event,
           date: '',
-          time: '19:00',
-          venue: '',
           address: '',
+          maps_url: '',
           wa_template: config.defaults.waTemplate,
           email_subject: config.defaults.emailSubject,
         },
@@ -113,8 +112,27 @@ export function EventForm() {
                 <input type="time" className={inputClass} value={form.time} onChange={set('time')} required />
               </Field>
             </div>
-            <Field label="Lugar" hint="Nombre corto del lugar: va en la tarjeta y en el mensaje.">
-              <input className={inputClass} value={form.venue} onChange={set('venue')} required maxLength={120} placeholder="Hotel Sheraton, Salón Cuscatlán" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Lugar" hint="Va en la tarjeta y en el mensaje.">
+                <input className={inputClass} value={form.venue} onChange={set('venue')} required maxLength={120} placeholder="Urbby Hub" />
+              </Field>
+              <Field label="Dress code">
+                <input className={inputClass} value={form.dress_code} onChange={set('dress_code')} maxLength={60} placeholder="Business Casual" />
+              </Field>
+            </div>
+            <Field
+              label="Link de Google Maps (opcional)"
+              hint="Sale como botón en el correo y en la página de la invitación. No va en el WhatsApp a menos que agregues {mapa} al texto."
+            >
+              <input
+                type="url"
+                inputMode="url"
+                className={inputClass}
+                value={form.maps_url}
+                onChange={set('maps_url')}
+                maxLength={500}
+                placeholder="https://maps.app.goo.gl/…"
+              />
             </Field>
             <Field label="Dirección (opcional)" hint="Solo se muestra en el correo.">
               <input className={inputClass} value={form.address} onChange={set('address')} maxLength={200} />
@@ -123,9 +141,10 @@ export function EventForm() {
 
           <Card className="grid gap-4 p-5">
             <div>
-              <h2 className="text-lg font-bold">Mensaje de WhatsApp</h2>
+              <h2 className="text-lg font-bold">Texto de la invitación</h2>
               <p className="mt-1 text-sm text-ink-mute">
-                Va como texto de la imagen. Sin enlaces: un link en el primer mensaje a alguien que no te tiene guardado sube el riesgo de bloqueo.
+                Es el mismo para el WhatsApp (va como texto de la imagen) y para el cuerpo del correo. Evita enlaces: un link en el primer
+                mensaje de WhatsApp a alguien que no te tiene guardado sube el riesgo de bloqueo.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -149,7 +168,9 @@ export function EventForm() {
               maxLength={1500}
             />
             {unknown.length ? <Notice tone="warn">No reconozco {unknown.map((u) => `{${u}}`).join(', ')}: se enviaría tal cual.</Notice> : null}
-            {/https?:\/\/|www\./i.test(form.wa_template) ? <Notice tone="warn">El mensaje tiene un enlace. Mejor quítalo para reducir el riesgo.</Notice> : null}
+            {/https?:\/\/|www\.|\{mapa\}/i.test(form.wa_template) ? (
+              <Notice tone="warn">El texto lleva un enlace. En el WhatsApp sube el riesgo de bloqueo: mejor déjalo solo en el correo.</Notice>
+            ) : null}
             <Field label="Asunto del correo">
               <input className={inputClass} value={form.email_subject} onChange={set('email_subject')} required maxLength={150} />
             </Field>
@@ -190,7 +211,7 @@ export function EventForm() {
 function CardPreview({ form }: { form: Form }) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { name, date, time, venue } = form;
+  const { name, date, time, venue, dress_code } = form;
 
   useEffect(() => {
     let revoked: string | null = null;
@@ -199,7 +220,7 @@ function CardPreview({ form }: { form: Form }) {
       setLoading(true);
       try {
         const blob = await api<Blob>('/events/card-preview', {
-          body: { name, date: date || today(), time, venue, guestName: SAMPLE_GUEST.name, guestBusiness: SAMPLE_GUEST.business },
+          body: { name, date: date || today(), time, venue, dress_code, guestName: SAMPLE_GUEST.name, guestBusiness: SAMPLE_GUEST.business },
         });
         if (cancelled) return;
         revoked = URL.createObjectURL(blob);
@@ -215,7 +236,7 @@ function CardPreview({ form }: { form: Form }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [name, date, time, venue]);
+  }, [name, date, time, venue, dress_code]);
 
   return (
     <div className="relative aspect-[4/5] overflow-hidden rounded-md bg-[#021d59]">

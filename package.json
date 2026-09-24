@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,yellow \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "tsx watch --env-file-if-exists=.env src/server/index.ts",
+    "dev:server": "node --watch --env-file-if-exists=.env --import tsx src/server/index.ts",
     "dev:web": "vite",
     "build": "vite build && tsup",
     "start": "node dist/server/index.js",

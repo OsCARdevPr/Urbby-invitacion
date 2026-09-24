@@ -23,7 +23,9 @@ export interface EventRow {
   time: string; // HH:MM
   venue: string;
   address: string;
-  wa_template: string;
+  dress_code: string;
+  maps_url: string; // enlace de Google Maps, opcional
+  wa_template: string; // texto de la invitación: pie del WhatsApp y cuerpo del correo
   email_subject: string;
   created_at: string;
 }

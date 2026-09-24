@@ -1,4 +1,4 @@
-import { config, evolutionConfigured } from '../config';
+import { config, evolutionConfigured, LOCAL_URL_BLOCK, publicUrlIsLocal } from '../config';
 import { db, getEvent, kvGet, kvSet, nowIso } from '../db';
 import type { GuestRow, WaSettings, WaState, WaStatusResponse } from '../../shared/types';
 import { getCardPng } from '../services/card';
@@ -79,6 +79,7 @@ export function waStatus(): WaStatusResponse {
 
 export function startCampaign(): string | null {
   if (!evolutionConfigured()) return 'Configura EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE antes de empezar.';
+  if (publicUrlIsLocal()) return LOCAL_URL_BLOCK;
   if (queuedCount() === 0) return 'No hay invitados en la cola. Encola primero a los de un evento.';
   const state = getState();
   // Reanudar no se salta la pausa que estaba corriendo: pausar y reanudar no debe acelerar el ritmo.

@@ -44,39 +44,147 @@ export interface RawRow {
   email: string;
 }
 
-/** Lee la primera hoja con encabezados reconocibles. Devuelve las filas crudas, sin validar. */
-export async function readGuestsXlsx(buffer: ArrayBuffer): Promise<RawRow[]> {
+type Grid = string[][];
+
+const HEADERS_MISSING = 'No encontré los encabezados. El archivo debe tener columnas Nombre, Negocio, Teléfono y Correo.';
+
+/**
+ * Lee la lista de invitados desde Excel (.xlsx) o CSV. El formato se detecta por el contenido, no por
+ * la extensión: un .xlsx es un zip (empieza con "PK"); cualquier otra cosa se intenta como CSV.
+ */
+export async function readGuestsFile(buffer: ArrayBuffer): Promise<RawRow[]> {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    for (const grid of await xlsxGrids(buffer)) {
+      const rows = guestsFromGrid(grid);
+      if (rows) return rows;
+    }
+    throw new Error(HEADERS_MISSING);
+  }
+  if (bytes[0] === 0xd0 && bytes[1] === 0xcf) {
+    throw new Error('Es un Excel antiguo (.xls). Guárdalo como .xlsx o como CSV e inténtalo de nuevo.');
+  }
+  const rows = guestsFromGrid(parseCsv(decodeText(bytes)));
+  if (!rows) throw new Error(HEADERS_MISSING);
+  return rows;
+}
+
+/** Cada hoja del libro como tabla de textos. */
+async function xlsxGrids(buffer: ArrayBuffer): Promise<Grid[]> {
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(buffer);
   } catch {
-    throw new Error('No se pudo leer el archivo. Guárdalo como Excel (.xlsx) e inténtalo de nuevo.');
+    throw new Error('No se pudo leer el archivo. Guárdalo como Excel (.xlsx) o CSV e inténtalo de nuevo.');
   }
-
-  for (const sheet of workbook.worksheets) {
-    // El encabezado puede no estar en la fila 1 (títulos, logos…): busca en las primeras 10.
-    for (let headerRow = 1; headerRow <= Math.min(10, sheet.rowCount); headerRow++) {
-      const columns = new Map<Field, number>();
-      sheet.getRow(headerRow).eachCell((cell, col) => {
-        const field = fieldForHeader(cellText(cell.value));
-        if (field && !columns.has(field)) columns.set(field, col);
+  return workbook.worksheets.map((sheet) => {
+    const grid: Grid = [];
+    for (let i = 1; i <= sheet.rowCount; i++) {
+      const cells: string[] = [];
+      sheet.getRow(i).eachCell({ includeEmpty: true }, (cell, col) => {
+        cells[col - 1] = cellText(cell.value);
       });
-      if (!columns.has('name') || !(columns.has('phone') || columns.has('email'))) continue;
+      grid.push(Array.from(cells, (c) => c ?? ''));
+    }
+    return grid;
+  });
+}
 
-      const rows: RawRow[] = [];
-      const read = (r: ExcelJS.Row, f: Field) => {
-        const col = columns.get(f);
-        return col ? clean(cellText(r.getCell(col).value)) : '';
-      };
-      for (let i = headerRow + 1; i <= sheet.rowCount; i++) {
-        const r = sheet.getRow(i);
-        const raw = { row: i, name: read(r, 'name'), business: read(r, 'business'), phone: read(r, 'phone'), email: read(r, 'email') };
-        if (raw.name || raw.phone || raw.email) rows.push(raw);
+/** UTF-8 (con o sin BOM); si no es UTF-8 válido, Windows-1252, que es como exporta Excel en español. */
+export function decodeText(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^﻿/, '');
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
+/**
+ * CSV según RFC 4180 (comillas dobles, saltos de línea dentro de comillas). El separador se deduce de la
+ * primera línea: coma, punto y coma (Excel en español) o tabulador.
+ */
+export function parseCsv(text: string): Grid {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
+  const delimiter = [',', ';', '\t'].sort((a, b) => firstLine.split(b).length - firstLine.split(a).length)[0];
+
+  const grid: Grid = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+      } else {
+        field += c;
       }
-      return rows;
+    } else if (c === '"' && field === '') {
+      quoted = true;
+    } else if (c === delimiter) {
+      row.push(field);
+      field = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field);
+      grid.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += c;
     }
   }
-  throw new Error('No encontré los encabezados. La primera fila debe tener: Nombre, Negocio, Teléfono, Correo.');
+  if (field !== '' || row.length) {
+    row.push(field);
+    grid.push(row);
+  }
+  return grid;
+}
+
+/**
+ * Busca la fila de encabezados en las primeras 10 (puede haber títulos antes) y devuelve los invitados,
+ * o null si esta tabla no tiene las columnas necesarias.
+ */
+function guestsFromGrid(grid: Grid): RawRow[] | null {
+  for (let h = 0; h < Math.min(10, grid.length); h++) {
+    const columns = new Map<Field, number>();
+    grid[h].forEach((header, col) => {
+      const field = fieldForHeader(header);
+      if (field && !columns.has(field)) columns.set(field, col);
+    });
+    if (!columns.has('name') || !(columns.has('phone') || columns.has('email'))) continue;
+
+    const read = (cells: string[], f: Field) => {
+      const col = columns.get(f);
+      return col === undefined ? '' : clean(cells[col] ?? '');
+    };
+    const rows: RawRow[] = [];
+    for (let i = h + 1; i < grid.length; i++) {
+      const cells = grid[i];
+      const raw = { row: i + 1, name: tidyName(read(cells, 'name')), business: read(cells, 'business'), phone: read(cells, 'phone'), email: read(cells, 'email') };
+      if (raw.name || raw.phone || raw.email) rows.push(raw);
+    }
+    return rows;
+  }
+  return null;
+}
+
+/**
+ * Ordena las mayúsculas de un nombre escrito TODO EN MAYÚSCULAS o todo en minúsculas
+ * ("GENESIS DE CARCAMO" → "Genesis de Carcamo"). Si ya viene con mayúsculas y minúsculas, se respeta.
+ * También quita puntuación suelta al final ("Carlos Hernandez." → "Carlos Hernandez").
+ */
+export function tidyName(input: string): string {
+  const name = clean(input).replace(/[\s.,;:]+$/, '');
+  const letters = name.replace(/[^\p{L}]/gu, '');
+  if (!letters || (letters !== letters.toUpperCase() && letters !== letters.toLowerCase())) return name;
+  return name
+    .toLowerCase()
+    .replace(/(^|[\s\-'’])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase())
+    .replace(/ (De|Del|La|Las|Los|Y|E)(?= )/g, (_, p: string) => ` ${p.toLowerCase()}`);
 }
 
 /**

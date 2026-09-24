@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
-import { assertConfig, config, evolutionConfigured, resendConfigured } from './config';
+import { assertConfig, config, evolutionConfigured, publicUrlIsLocal, resendConfigured } from './config';
 import { db } from './db';
 import { authRoutes, requireRole, type AppEnv } from './auth';
 import { eventRoutes } from './routes/events';
@@ -13,7 +13,7 @@ import { checkinRoutes } from './routes/checkin';
 import { waRoutes, webhookUrl } from './routes/wa';
 import { publicRoutes } from './routes/public';
 import { handleEvolutionEvent } from './services/webhook';
-import { DEFAULT_EMAIL_SUBJECT, DEFAULT_WA_TEMPLATE, PLACEHOLDERS } from '../shared/template';
+import { DEFAULT_EMAIL_SUBJECT, DEFAULT_EVENT, DEFAULT_WA_TEMPLATE, PLACEHOLDERS } from '../shared/template';
 import { emailJobStatus, recoverEmails } from './worker/emailJob';
 import { startWorker, stopWorker } from './worker/whatsappQueue';
 
@@ -48,9 +48,10 @@ api.get('/config', (c) => {
     evolutionConfigured: evolutionConfigured(),
     resendConfigured: resendConfigured(),
     publicBaseUrl: config.publicBaseUrl,
+    localUrl: publicUrlIsLocal(),
     senderPhoneDisplay: config.senderPhoneDisplay,
     webhookUrl: isAdmin && config.webhookSecret ? webhookUrl() : null,
-    defaults: { waTemplate: DEFAULT_WA_TEMPLATE, emailSubject: DEFAULT_EMAIL_SUBJECT },
+    defaults: { waTemplate: DEFAULT_WA_TEMPLATE, emailSubject: DEFAULT_EMAIL_SUBJECT, event: DEFAULT_EVENT },
     placeholders: PLACEHOLDERS,
   });
 });

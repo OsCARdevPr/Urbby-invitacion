@@ -129,9 +129,9 @@ export function EventDetail() {
 
       {/* Pasos en el orden en que se hacen */}
       <Card className="mb-6 divide-y divide-line">
-        <Step n={1} title="Importar invitados" done={stats.total > 0} detail="Excel con las columnas Nombre, Negocio, Teléfono y Correo.">
+        <Step n={1} title="Importar invitados" done={stats.total > 0} detail="Excel (.xlsx) o CSV con las columnas Nombre, Negocio, Teléfono y Correo.">
           <Button icon={<FileSpreadsheet className="size-4" />} onClick={() => setImportOpen(true)}>
-            Importar Excel
+            Importar lista
           </Button>
         </Step>
         <Step n={2} title="Guardar los contactos en el teléfono" detail="Importa este archivo en el celular del número secundario antes de enviar por WhatsApp.">
@@ -150,9 +150,11 @@ export function EventDetail() {
           title="Enviar correos"
           done={stats.total > 0 && emailPending === 0 && !emailJob?.running}
           detail={
-            config.resendConfigured
-              ? 'A todos de una vez. El correo pide guardar el número de WhatsApp desde el que llegará la invitación.'
-              : 'Falta configurar RESEND_API_KEY en el servidor.'
+            config.localUrl
+              ? 'Desactivado en desarrollo: el QR apunta a localhost y no serviría en la puerta.'
+              : config.resendConfigured
+                ? 'A todos de una vez. El correo pide guardar el número de WhatsApp desde el que llegará la invitación.'
+                : 'Falta configurar RESEND_API_KEY en el servidor.'
           }
         >
           {emailJob?.running ? (
@@ -163,7 +165,7 @@ export function EventDetail() {
               icon={<Mail className="size-4" />}
               onClick={() => void sendEmails()}
               loading={busy === 'email'}
-              disabled={!emailPending || !config.resendConfigured}
+              disabled={!emailPending || !config.resendConfigured || config.localUrl}
             >
               {emailPending ? `Enviar ${emailPending} correos` : 'Sin correos pendientes'}
             </Button>

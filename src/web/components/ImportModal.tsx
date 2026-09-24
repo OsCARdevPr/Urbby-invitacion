@@ -81,8 +81,8 @@ export function ImportModal({
       {!rows ? (
         <>
           <p className="mb-4 text-ink-soft">
-            Sube un Excel (.xlsx) con las columnas <b>Nombre</b>, <b>Negocio</b>, <b>Teléfono</b> y <b>Correo</b>. Los teléfonos pueden
-            venir con o sin +503. Antes de guardar vas a ver una vista previa.
+            Sube un Excel (.xlsx) o un CSV con las columnas <b>Nombre</b>, <b>Negocio</b>, <b>Teléfono</b> y <b>Correo</b>. Otras columnas
+            (fecha de registro, número…) se ignoran. Los teléfonos pueden venir con o sin +503. Antes de guardar vas a ver una vista previa.
           </p>
           <button
             type="button"
@@ -109,14 +109,14 @@ export function ImportModal({
               <>
                 <Upload className="size-7 text-ink-mute" />
                 <span className="font-bold">Elegir archivo o arrastrarlo aquí</span>
-                <span className="text-sm text-ink-mute">Solo .xlsx, hasta 5 MB</span>
+                <span className="text-sm text-ink-mute">.xlsx o .csv, hasta 5 MB</span>
               </>
             )}
           </button>
           <input
             ref={inputRef}
             type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

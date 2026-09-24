@@ -18,7 +18,7 @@ const YELLOW = '#FAB822';
 const INK_SOFT = '#C6D4EC';
 const INK_MUTE = '#9BB0D4';
 
-type CardEvent = Pick<EventRow, 'name' | 'date' | 'time' | 'venue'>;
+type CardEvent = Pick<EventRow, 'name' | 'date' | 'time' | 'venue' | 'dress_code'>;
 type CardGuest = Pick<GuestRow, 'name' | 'business' | 'token'>;
 
 // ── Recursos que se cargan una sola vez ──────────────────────────
@@ -192,12 +192,15 @@ function Card({ event, guest, qr }: { event: CardEvent; guest: CardGuest; qr: st
           </div>
         </div>
 
-        {/* Fecha y lugar */}
+        {/* Fecha, lugar y condiciones */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ fontSize: 30, fontWeight: 700, letterSpacing: 1 }}>
             {`${formatDate(event.date)} · ${formatTime(event.time)}`.toUpperCase()}
           </div>
-          <div style={{ fontSize: 26, fontWeight: 500, color: INK_SOFT, marginTop: 8, textAlign: 'center' }}>{event.venue}</div>
+          <div style={{ fontSize: 26, fontWeight: 500, color: INK_SOFT, marginTop: 6, textAlign: 'center' }}>
+            {event.dress_code ? `${event.venue} · Dress code: ${event.dress_code}` : event.venue}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 3, color: YELLOW, marginTop: 10 }}>VÁLIDA PARA UNA PERSONA</div>
         </div>
       </div>
     </div>
@@ -222,7 +225,9 @@ const cardsDir = () => path.join(config.dataDir, 'cards');
 export async function getCardPng(event: CardEvent, guest: CardGuest): Promise<Buffer> {
   const hash = crypto
     .createHash('sha1')
-    .update(JSON.stringify([event.name, event.date, event.time, event.venue, guest.name, guest.business, config.publicBaseUrl, 3]))
+    .update(
+      JSON.stringify([event.name, event.date, event.time, event.venue, event.dress_code, guest.name, guest.business, config.publicBaseUrl, 4]),
+    )
     .digest('hex')
     .slice(0, 10);
   const dir = cardsDir();

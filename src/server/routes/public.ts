@@ -27,6 +27,7 @@ const page = (title: string, body: string) => `<!doctype html>
   img { width: 100%; height: auto; border-radius: 16px; display: block; box-shadow: 0 16px 40px rgba(0,0,0,.35); }
   a.btn { display: block; margin-top: 20px; text-align: center; background: #FAB822; color: #021D59; font-weight: 800;
           padding: 14px; border-radius: 12px; text-decoration: none; }
+  a.btn.secondary { margin-top: 10px; background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.35); }
   .tip { font-size: 14px; margin-top: 16px; text-align: center; }
 </style>
 </head>
@@ -44,11 +45,14 @@ export const publicRoutes = new Hono()
     return c.html(
       page(
         `Invitación · ${event.name}`,
-        `<h1>Hola, ${e(guest.name.split(' ')[0])}</h1>
-         <p>${e(formatDate(event.date))} · ${e(formatTime(event.time))}<br>${e(event.venue)}</p>
+        `<h1>¡Hola, ${e(guest.name.split(' ')[0])}!</h1>
+         <p>${e(formatDate(event.date))} · ${e(formatTime(event.time))}<br>${e(event.venue)}${
+           event.dress_code ? `<br>Dress code: ${e(event.dress_code)}` : ''
+         }</p>
          <img src="/i/${token}/card.png" alt="Tarjeta de invitación de ${e(guest.name)}">
          <a class="btn" href="/i/${token}/card.png" download="invitacion-urbby.png">Descargar invitación</a>
-         <p class="tip">Presenta el código QR en la entrada. Sube el brillo de la pantalla para que se lea más rápido.</p>`,
+         ${event.maps_url ? `<a class="btn secondary" href="${e(event.maps_url)}" target="_blank" rel="noopener">Cómo llegar (Google Maps)</a>` : ''}
+         <p class="tip">La invitación es válida para una persona. Presenta el código QR en la entrada y sube el brillo de la pantalla para que se lea más rápido.</p>`,
       ),
     );
   })

@@ -1,4 +1,4 @@
-import { resendConfigured } from '../config';
+import { LOCAL_URL_BLOCK, publicUrlIsLocal, resendConfigured } from '../config';
 import { db, getEvent, nowIso } from '../db';
 import type { EventRow, GuestRow } from '../../shared/types';
 import { getCardPng } from '../services/card';
@@ -55,6 +55,7 @@ export async function sendOneEmail(event: EventRow, guest: GuestRow, idempotency
 /** Devuelve el id del trabajo iniciado, o un mensaje de error. */
 export function startEmailJob(eventId: number): { id: number } | { error: string } {
   if (job.running) return { error: 'Ya hay un envío de correos en curso.' };
+  if (publicUrlIsLocal()) return { error: LOCAL_URL_BLOCK };
   if (!resendConfigured()) return { error: 'Configura RESEND_API_KEY antes de enviar correos.' };
   const event = getEvent(eventId);
   if (!event) return { error: 'Evento no encontrado.' };

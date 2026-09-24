@@ -59,6 +59,10 @@ const migrations: string[] = [
     value TEXT NOT NULL
   );
   `,
+  `
+  ALTER TABLE events ADD COLUMN dress_code TEXT NOT NULL DEFAULT '';
+  ALTER TABLE events ADD COLUMN maps_url   TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 function migrate() {
