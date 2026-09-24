@@ -129,7 +129,6 @@ export function GuestModal({
                 <Badge tone={waTone}>{waLabel}</Badge>
               </div>
               {g.wa_sent_at ? <p className="mt-1 text-sm text-ink-mute">Enviado {fmtDateTime(g.wa_sent_at)}</p> : null}
-              {g.wa_replied_at ? <p className="mt-1 text-sm text-ok">Respondió {fmtDateTime(g.wa_replied_at)}</p> : null}
               {g.wa_error ? <p className="mt-1 text-sm text-bad">{g.wa_error}</p> : null}
               {g.wa_status === 'uncertain' ? (
                 <div className="mt-2">
@@ -167,15 +166,9 @@ export function GuestModal({
               <h3 className="mr-auto font-bold">
                 Asistencia
                 <span className="block text-sm font-normal text-ink-mute">
-                  {g.checked_in_at ? `Ingresó ${fmtDateTime(g.checked_in_at)}` : g.confirmed_at ? 'Confirmó, aún no ingresa' : 'Sin confirmar'}
+                  {g.checked_in_at ? `Ingresó ${fmtDateTime(g.checked_in_at)}` : 'Aún no ingresa'}
                 </span>
               </h3>
-              <Button
-                loading={busy === 'confirm'}
-                onClick={() => void act('confirm', '/confirm', { confirmed: !g.confirmed_at })}
-              >
-                {g.confirmed_at ? 'Quitar confirmación' : 'Marcar confirmado'}
-              </Button>
               {g.checked_in_at ? (
                 <Button loading={busy === 'undo'} onClick={() => void act('undo', '/checkin/undo', undefined, 'Ingreso deshecho')}>
                   Deshacer ingreso

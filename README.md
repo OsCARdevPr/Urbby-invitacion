@@ -33,8 +33,6 @@ Todo corre en **un solo contenedor**.
 
    Si un QR no se lee, se puede **buscar por nombre** y marcar el ingreso a mano.
 
-Quien responda **CONFIRMO** por WhatsApp queda marcado como confirmado (requiere el webhook, ver abajo).
-
 ---
 
 ## WhatsApp sin que bloqueen el número
@@ -110,7 +108,7 @@ La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa l
    - Agrega `invitaciones.urbby.app`, puerto **3000**, con HTTPS (Let's Encrypt).
    - En el DNS de urbby.app crea un registro **A** `invitaciones` → IP del VPS.
 6. **Deploy.** Luego entra al panel → *WhatsApp* → **Configurar en Evolution**, que apunta el webhook de la instancia a la
-   app. Hazlo **después** de tener el dominio con HTTPS.
+   app para recibir los estados de entrega y lectura. Hazlo **después** de tener el dominio con HTTPS.
 
 > Mientras `PUBLIC_BASE_URL` apunte a `localhost` (desarrollo), los envíos masivos de correo y WhatsApp están bloqueados:
 > esas invitaciones no servirían en la puerta. Sí se puede enviar a un invitado puntual desde su ficha, para probar.

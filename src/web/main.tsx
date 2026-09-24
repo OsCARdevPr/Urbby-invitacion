@@ -18,6 +18,7 @@ import { EventForm } from './pages/EventForm';
 import { EventDetail } from './pages/EventDetail';
 import { WhatsApp } from './pages/WhatsApp';
 import { Scan } from './pages/Scan';
+import { Connections } from './pages/Connections';
 
 function App() {
   const [config, setConfig] = useState<AppConfig | null | 'loading'>('loading');
@@ -65,6 +66,7 @@ function App() {
             <Route path="/events/:id" element={<EventDetail />} />
             <Route path="/events/:id/edit" element={<EventForm />} />
             <Route path="/whatsapp" element={<WhatsApp />} />
+            <Route path="/conexiones" element={<Connections />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (

@@ -113,6 +113,21 @@ export async function sendInvitationEmail(event: EventRow, guest: GuestRow, png:
   return { id: data?.id ?? null };
 }
 
+/**
+ * Estado del dominio remitente en Resend. Una clave "solo envío" no puede listar dominios: en ese caso
+ * se devuelve restricted y la única forma de comprobar es enviando un correo de prueba.
+ */
+export async function resendDomainStatus(domain: string): Promise<{ status: string | null; restricted: boolean }> {
+  if (!resendConfigured()) throw new Error('Falta RESEND_API_KEY');
+  const { data, error } = await resend().domains.list();
+  if (error) {
+    if (error.name === 'restricted_api_key') return { status: null, restricted: true };
+    throw Object.assign(new Error(error.message), { name: error.name });
+  }
+  const found = data?.data.find((d) => d.name === domain);
+  return { status: found?.status ?? 'missing', restricted: false };
+}
+
 const slug = (s: string) =>
   s
     .normalize('NFD')

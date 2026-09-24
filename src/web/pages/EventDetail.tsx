@@ -29,7 +29,6 @@ const FILTERS = {
     label: 'Con problemas',
     test: (g: GuestRow) => ['failed', 'no_whatsapp', 'uncertain'].includes(g.wa_status) || g.email_status === 'failed',
   },
-  confirmed: { label: 'Confirmaron', test: (g: GuestRow) => Boolean(g.confirmed_at) },
   checked_in: { label: 'Ingresaron', test: (g: GuestRow) => Boolean(g.checked_in_at) },
 } as const;
 type FilterKey = keyof typeof FILTERS;
@@ -119,11 +118,10 @@ export function EventDetail() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Invitados" value={stats.total} />
         <Stat label="Correos" value={stats.emailSent} hint={stats.emailFailed ? `${stats.emailFailed} fallaron` : 'enviados'} />
         <Stat label="WhatsApp" value={stats.waSent} hint={`${stats.waRead} leídos · ${stats.waQueued} en cola`} />
-        <Stat label="Confirmaron" value={stats.confirmed} />
         <Stat label="Ingresaron" value={stats.checkedIn} accent />
       </div>
 
@@ -226,7 +224,6 @@ export function EventDetail() {
                 <th className="px-4 py-3">Contacto</th>
                 <th className="px-4 py-3">Correo</th>
                 <th className="px-4 py-3">WhatsApp</th>
-                <th className="px-4 py-3">Confirmó</th>
                 <th className="px-4 py-3">Ingresó</th>
               </tr>
             </thead>
@@ -247,7 +244,6 @@ export function EventDetail() {
                   <td className="px-4 py-3">
                     <StatusBadge map={WA_LABEL} status={g.wa_status} error={g.wa_error} />
                   </td>
-                  <td className="px-4 py-3">{g.confirmed_at ? <Check className="size-5 text-ok" aria-label="Sí" /> : <span className="text-ink-mute">—</span>}</td>
                   <td className="px-4 py-3 tabular-nums">{g.checked_in_at ? <b className="text-ok">{fmtTime(g.checked_in_at)}</b> : <span className="text-ink-mute">—</span>}</td>
                 </tr>
               ))}
@@ -264,7 +260,7 @@ export function EventDetail() {
                       <div className="truncate font-bold">{g.name}</div>
                       <div className="truncate text-sm text-ink-mute">{g.business || formatPhone(g.phone)}</div>
                     </div>
-                    {g.checked_in_at ? <Badge tone="ok">Ingresó {fmtTime(g.checked_in_at)}</Badge> : g.confirmed_at ? <Badge tone="ok">Confirmó</Badge> : null}
+                    {g.checked_in_at ? <Badge tone="ok">Ingresó {fmtTime(g.checked_in_at)}</Badge> : null}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <StatusBadge map={EMAIL_LABEL} status={g.email_status} prefix="Correo" />

@@ -4,7 +4,7 @@ import { DEFAULT_WA_TEMPLATE, formatDate, formatTime, renderTemplate, templateVa
 import { waToHtml } from '../src/server/services/email';
 import { decodeText, parseCsv, readGuestsFile, tidyName, validateRows, type RawRow } from '../src/server/services/excel';
 import { DEFAULT_SETTINGS, INITIAL_STATE, gateReason, inWindow, localParts, nextDelay, validateSettings } from '../src/server/worker/pacing';
-import { extractText, isConfirmation, mapAck, phonesFromKey } from '../src/server/services/webhook';
+import { mapAck } from '../src/server/services/webhook';
 import { guestsToVcf } from '../src/server/services/vcf';
 
 describe('normalizePhone', () => {
@@ -65,6 +65,8 @@ describe('plantillas', () => {
     expect(text).toContain('*Dress code:* Business Casual');
     expect(text).toContain('válida para una persona');
     expect(text).not.toMatch(/\{\w+\}|https?:/);
+    expect(text).not.toMatch(/confirm/i);
+    expect(text.trim().endsWith('¡Te esperamos!')).toBe(true);
   });
 
   it('el correo convierte el formato de WhatsApp y escapa HTML', () => {
@@ -195,25 +197,6 @@ describe('webhook', () => {
     expect(mapAck('DELIVERY_ACK')).toBe('delivered');
     expect(mapAck(4)).toBe('read');
     expect(mapAck('PENDING')).toBeNull();
-  });
-
-  it('saca el texto de distintos tipos de mensaje', () => {
-    expect(extractText({ conversation: 'hola' })).toBe('hola');
-    expect(extractText({ extendedTextMessage: { text: 'CONFIRMO' } })).toBe('CONFIRMO');
-    expect(extractText({ ephemeralMessage: { message: { conversation: 'efímero' } } })).toBe('efímero');
-  });
-
-  it('encuentra el teléfono aunque el JID sea @lid', () => {
-    expect(phonesFromKey({ remoteJid: '123@lid', remoteJidAlt: '50371234567@s.whatsapp.net' }, {})).toEqual(['50371234567']);
-    expect(phonesFromKey({ remoteJid: '50371234567:12@s.whatsapp.net' }, {})).toEqual(['50371234567']);
-    expect(phonesFromKey({ remoteJid: '123@lid' }, {})).toEqual([]);
-  });
-
-  it('detecta confirmaciones', () => {
-    expect(isConfirmation('CONFIRMO')).toBe(true);
-    expect(isConfirmation('¡Confirmó! 🙌')).toBe(true);
-    expect(isConfirmation('confirmado, gracias')).toBe(true);
-    expect(isConfirmation('gracias')).toBe(false);
   });
 });
 

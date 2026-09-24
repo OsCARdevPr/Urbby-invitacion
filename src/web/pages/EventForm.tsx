@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import { api } from '../api';
@@ -6,7 +6,7 @@ import { PageHeader } from '../components/Layout';
 import { Button, Card, Field, inputClass, Notice, Spinner, useToast } from '../components/ui';
 import { useSession } from '../session';
 import type { EventRow } from '../../shared/types';
-import { renderTemplate, templateVars } from '../../shared/template';
+import { WhatsAppPreview } from '../components/CardPreview';
 
 type Form = Pick<EventRow, 'name' | 'date' | 'time' | 'venue' | 'address' | 'dress_code' | 'maps_url' | 'wa_template' | 'email_subject'>;
 
@@ -83,7 +83,6 @@ export function EventForm() {
 
   if (!form) return error ? <Notice tone="bad">{error}</Notice> : <Spinner />;
 
-  const preview = renderTemplate(form.wa_template, templateVars({ ...form, date: form.date || today() }, SAMPLE_GUEST));
   const unknown = [...form.wa_template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => !config.placeholders.includes(k));
 
   return (
@@ -193,67 +192,10 @@ export function EventForm() {
         <aside className="grid content-start gap-6 lg:sticky lg:top-20">
           <div>
             <h3 className="mb-2 text-sm font-bold tracking-wide text-ink-mute uppercase">Así se verá el WhatsApp</h3>
-            {/* Colores de WhatsApp fijos: es una maqueta del chat, no parte del tema del panel. */}
-            <div className="rounded-xl bg-[#efe7dd] p-3">
-              <div className="ml-auto max-w-[92%] rounded-lg rounded-tr-none bg-[#d9fdd3] p-2 text-[15px] leading-snug whitespace-pre-wrap text-[#111b21] shadow-sm">
-                <CardPreview form={form} />
-                <div className="px-1 pt-2">{waFormat(preview)}</div>
-              </div>
-            </div>
+            <WhatsAppPreview event={form} guestName={SAMPLE_GUEST.name} guestBusiness={SAMPLE_GUEST.business} />
           </div>
         </aside>
       </form>
     </>
   );
 }
-
-/** Vista previa de la tarjeta, renderizada en el servidor. Se pide con una pausa para no generar una por tecla. */
-function CardPreview({ form }: { form: Form }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const { name, date, time, venue, dress_code } = form;
-
-  useEffect(() => {
-    let revoked: string | null = null;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const blob = await api<Blob>('/events/card-preview', {
-          body: { name, date: date || today(), time, venue, dress_code, guestName: SAMPLE_GUEST.name, guestBusiness: SAMPLE_GUEST.business },
-        });
-        if (cancelled) return;
-        revoked = URL.createObjectURL(blob);
-        setUrl((old) => {
-          if (old) URL.revokeObjectURL(old);
-          return revoked;
-        });
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 900);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [name, date, time, venue, dress_code]);
-
-  return (
-    <div className="relative aspect-[4/5] overflow-hidden rounded-md bg-[#021d59]">
-      {url ? <img src={url} alt="Vista previa de la tarjeta" className={`size-full object-cover transition ${loading ? 'opacity-60' : ''}`} /> : null}
-      {loading && !url ? <div className="absolute inset-0 grid place-items-center text-sm text-white/70">Generando tarjeta…</div> : null}
-    </div>
-  );
-}
-
-/** Formato de WhatsApp: *negrita*, _cursiva_, ~tachado~. */
-function waFormat(text: string): ReactNode[] {
-  return text.split(/(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~)/g).map((part, i) => {
-    if (/^\*[^*]+\*$/.test(part)) return <b key={i}>{part.slice(1, -1)}</b>;
-    if (/^_[^_]+_$/.test(part)) return <i key={i}>{part.slice(1, -1)}</i>;
-    if (/^~[^~]+~$/.test(part)) return <s key={i}>{part.slice(1, -1)}</s>;
-    return part;
-  });
-}
-
-const today = () => new Date().toISOString().slice(0, 10);

@@ -237,7 +237,7 @@ function ResultOverlay({ shown, onDismiss }: { shown: Shown; onDismiss: () => vo
     icon = <CheckCircle2 className="size-16" />;
     title = 'Bienvenido/a';
     guest = r.guest;
-    detail = r.guest.confirmed ? 'Confirmó su asistencia' : '';
+    detail = '';
   } else if (r.result === 'already') {
     bg = 'bg-[#fab822] text-[#021d59]';
     icon = <AlertTriangle className="size-16" />;

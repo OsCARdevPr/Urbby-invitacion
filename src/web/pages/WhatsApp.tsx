@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Pause, Play, RefreshCw, ShieldCheck, Webhook } from 'lucide-react';
+import { Link } from 'react-router';
 import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { Badge, Button, Card, cx, Field, inputClass, Notice, Spinner, useToast } from '../components/ui';
@@ -7,18 +8,10 @@ import { fmtDateTime, fmtDuration } from '../lib';
 import { useSession } from '../session';
 import type { WaSettings, WaStatusResponse } from '../../shared/types';
 
-interface Unmatched {
-  jid: string;
-  pushName: string;
-  text: string;
-  at: string;
-}
-
 export function WhatsApp() {
   const { config } = useSession();
   const toast = useToast();
   const status = useApi<WaStatusResponse>('/wa/status', 5000);
-  const unmatched = useApi<Unmatched[]>('/wa/unmatched', 30000);
   const [busy, setBusy] = useState<string | null>(null);
   const now = useNow();
 
@@ -154,14 +147,17 @@ export function WhatsApp() {
             <Button className="mt-3 w-full" icon={<RefreshCw className="size-4" />} onClick={() => void checkConnection()} loading={busy === 'conn'}>
               Comprobar ahora
             </Button>
+            <Link to="/conexiones" className="mt-2 block text-center text-sm font-semibold text-ink-soft hover:text-ink">
+              Diagnóstico completo y envío de prueba →
+            </Link>
           </Card>
 
           <Card className="p-5">
             <h2 className="flex items-center gap-2 text-lg font-bold">
-              <Webhook className="size-5" /> Respuestas y estados
+              <Webhook className="size-5" /> Estados de entrega
             </h2>
             <p className="mt-1 text-sm text-ink-mute">
-              El webhook avisa cuando un mensaje se entrega o se lee, y marca como confirmado a quien responda <b>CONFIRMO</b>.
+              El webhook avisa cuando un mensaje se entrega o se lee, para verlo en la lista de invitados.
             </p>
             {config.webhookUrl ? (
               <>
@@ -176,28 +172,6 @@ export function WhatsApp() {
                 <Notice tone="warn">Define WEBHOOK_SECRET en el servidor para activarlo.</Notice>
               </div>
             )}
-            {unmatched.data?.length ? (
-              <div className="mt-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold">Mensajes sin emparejar</h3>
-                  <button
-                    className="text-sm font-semibold text-ink-mute hover:text-ink"
-                    onClick={() => void api<Unmatched[]>('/wa/unmatched', { method: 'DELETE' }).then(unmatched.setData)}
-                  >
-                    Limpiar
-                  </button>
-                </div>
-                <p className="mb-2 text-xs text-ink-mute">No se pudo saber qué invitado los mandó. Si alguno confirma, márcalo a mano en su ficha.</p>
-                <ul className="grid gap-2">
-                  {unmatched.data.map((u) => (
-                    <li key={`${u.jid}${u.at}`} className="rounded-md bg-surface-2 p-2 text-sm">
-                      <b>{u.pushName || u.jid}</b> <span className="text-ink-mute">· {fmtDateTime(u.at)}</span>
-                      <div className="text-ink-soft">{u.text || '(sin texto)'}</div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
           </Card>
 
           <Card className="p-5">

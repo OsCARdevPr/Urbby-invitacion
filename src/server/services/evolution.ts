@@ -1,7 +1,7 @@
-import { config, evolutionConfigured } from '../config';
+import { config } from '../config';
 
-// Cliente mínimo de Evolution API v2. Solo usa los endpoints que necesita la campaña:
-// sendMedia (que ya verifica si el número tiene WhatsApp), connectionState y webhook/set.
+// Cliente mínimo de Evolution API v2. La campaña usa sendMedia (que ya verifica si el número
+// tiene WhatsApp), connectionState y webhook/set; el diagnóstico agrega consultas de solo lectura.
 // No se llama a /chat/whatsappNumbers en lote: hay reportes de cuentas restringidas por hacerlo.
 
 export class EvolutionError extends Error {
@@ -18,7 +18,9 @@ export class EvolutionError extends Error {
 }
 
 async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = 30_000): Promise<T> {
-  if (!evolutionConfigured()) throw new EvolutionError('Evolution API no está configurada', 0, null);
+  // Cada variable se revisa por separado para que el diagnóstico diga exactamente cuál falta.
+  if (!config.evolution.url) throw new EvolutionError('Falta EVOLUTION_URL', 0, null);
+  if (path !== '/' && !config.evolution.apiKey) throw new EvolutionError('Falta EVOLUTION_API_KEY', 0, null);
   let res: Response;
   try {
     res = await fetch(`${config.evolution.url}${path}`, {
@@ -60,7 +62,52 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown, tim
   return data as T;
 }
 
-const inst = () => encodeURIComponent(config.evolution.instance);
+const inst = () => {
+  if (!config.evolution.instance) throw new EvolutionError('Falta EVOLUTION_INSTANCE', 0, null);
+  return encodeURIComponent(config.evolution.instance);
+};
+
+// ── Diagnóstico (solo lectura) ───────────────────────────────────
+// Varias respuestas de Evolution traen datos sensibles (tokens de la instancia o de Facebook):
+// estas funciones devuelven solo los campos que el panel necesita.
+
+/** GET / no requiere API key: confirma que el servidor responde y da la versión. */
+export async function serverInfo(): Promise<{ version: string | null }> {
+  const data = await call<{ version?: string }>('GET', '/', undefined, 10_000);
+  return { version: typeof data?.version === 'string' ? data.version : null };
+}
+
+/** POST /verify-creds responde 200 solo si la API key es válida. */
+export async function verifyApiKey(): Promise<void> {
+  await call('POST', '/verify-creds', {}, 10_000);
+}
+
+/** Estado de la instancia y el número vinculado (ownerJid = 50371234567@s.whatsapp.net). */
+export async function instanceInfo(): Promise<{ exists: boolean; state: string; number: string | null; profileName: string | null }> {
+  const name = inst();
+  const list = await call<unknown>('GET', `/instance/fetchInstances?instanceName=${name}`, undefined, 10_000).catch((err) => {
+    if (err instanceof EvolutionError && err.status === 404) return [];
+    throw err;
+  });
+  const items = (Array.isArray(list) ? list : [list]) as Record<string, any>[];
+  const raw = items.map((i) => i?.instance ?? i).find((i) => (i?.name ?? i?.instanceName) === config.evolution.instance);
+  if (!raw) return { exists: false, state: 'unknown', number: null, profileName: null };
+  const owner = String(raw.ownerJid ?? raw.owner ?? '');
+  return {
+    exists: true,
+    state: String(raw.connectionStatus ?? raw.status ?? 'unknown'),
+    number: owner ? owner.split('@')[0].split(':')[0] : raw.number ? String(raw.number) : null,
+    profileName: raw.profileName ? String(raw.profileName) : null,
+  };
+}
+
+/** Webhook que tiene configurada la instancia, o null. */
+export async function findWebhook(): Promise<{ enabled: boolean; url: string | null; events: string[] } | null> {
+  const data = await call<Record<string, any> | null>('GET', `/webhook/find/${inst()}`, undefined, 10_000);
+  const w = data?.webhook ?? data;
+  if (!w || !w.url) return null;
+  return { enabled: Boolean(w.enabled), url: String(w.url), events: Array.isArray(w.events) ? w.events.map(String) : [] };
+}
 
 /** 'open' cuando el teléfono está vinculado y conectado. */
 export async function connectionState(): Promise<string> {
@@ -96,7 +143,8 @@ export async function sendImage(opts: {
   return { messageId: data?.key?.id ?? null };
 }
 
-export const WEBHOOK_EVENTS = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'];
+// Solo estados de entrega y conexión: los mensajes entrantes no se escuchan.
+export const WEBHOOK_EVENTS = ['MESSAGES_UPDATE', 'CONNECTION_UPDATE'];
 
 /**
  * Apunta el webhook de la instancia a esta app. Las versiones de v2 difieren en la forma del body:

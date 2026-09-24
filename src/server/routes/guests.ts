@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireRole, type AppEnv } from '../auth';
-import { db, getEvent, getGuest, nowIso } from '../db';
+import { db, getEvent, getGuest } from '../db';
 import { normalizePhone } from '../services/phone';
 import { clean, isEmail } from '../services/text';
 import { sendOneEmail } from '../worker/emailJob';
@@ -93,13 +93,6 @@ export const guestRoutes = new Hono<AppEnv>()
   .post('/:id/wa/mark-sent', (c) => {
     const id = parseId(c.req.param('id'));
     return markSent(id) ? c.json(getGuest(id)) : c.json({ error: 'Solo aplica a envíos inciertos o fallidos' }, 400);
-  })
-
-  .post('/:id/confirm', async (c) => {
-    const id = parseId(c.req.param('id'));
-    const body = (await c.req.json().catch(() => ({}))) as { confirmed?: boolean };
-    db.prepare('UPDATE guests SET confirmed_at = ? WHERE id = ?').run(body.confirmed ? nowIso() : null, id);
-    return c.json(getGuest(id));
   })
 
   .post('/:id/checkin/undo', (c) => {

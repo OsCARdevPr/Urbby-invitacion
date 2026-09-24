@@ -46,8 +46,6 @@ export interface GuestRow {
   wa_message_id: string | null;
   wa_sent_at: string | null;
   wa_error: string | null;
-  wa_replied_at: string | null;
-  confirmed_at: string | null;
   checked_in_at: string | null;
   checked_in_role: Role | null;
   created_at: string;
@@ -62,7 +60,6 @@ export interface EventStats {
   waDelivered: number;
   waRead: number;
   waProblems: number;
-  confirmed: number;
   checkedIn: number;
 }
 
@@ -128,5 +125,4 @@ export interface CheckinGuest {
   name: string;
   business: string;
   checkedInAt: string | null;
-  confirmed: boolean;
 }

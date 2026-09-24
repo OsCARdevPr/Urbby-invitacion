@@ -5,14 +5,12 @@ import { config, evolutionConfigured } from '../config';
 import { connectionState, setWebhook } from '../services/evolution';
 import { validateSettings } from '../worker/pacing';
 import {
-  getUnmatched,
   pauseCampaign,
   saveSettings,
   setConnection,
   startCampaign,
   waStatus,
 } from '../worker/whatsappQueue';
-import { kvSet } from '../db';
 
 const settingsSchema = z.object({
   dailyCap: z.number().int(),
@@ -76,10 +74,4 @@ export const waRoutes = new Hono<AppEnv>()
     } catch (err) {
       return c.json({ error: (err as Error).message }, 502);
     }
-  })
-
-  .get('/unmatched', (c) => c.json(getUnmatched()))
-  .delete('/unmatched', (c) => {
-    kvSet('wa_unmatched', { items: [] });
-    return c.json([]);
   });

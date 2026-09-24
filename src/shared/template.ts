@@ -14,7 +14,7 @@ export const DEFAULT_WA_TEMPLATE = `¡Hola {nombre}! Has sido uno de los 50 sele
 
 La invitación es válida para una persona. Presenta el código QR de la imagen en la entrada.
 
-¡Te esperamos! Respóndenos *CONFIRMO* por WhatsApp para apartar tu lugar.`;
+¡Te esperamos!`;
 
 export const DEFAULT_EMAIL_SUBJECT = '{primer_nombre}, tu invitación al pre-lanzamiento de Urbby App';
 

@@ -12,7 +12,6 @@ const toCheckinGuest = (g: GuestRow): CheckinGuest => ({
   name: g.name,
   business: g.business,
   checkedInAt: g.checked_in_at,
-  confirmed: Boolean(g.confirmed_at),
 });
 
 /** Marca el ingreso. El UPDATE condicionado evita que dos celulares registren a la misma persona a la vez. */

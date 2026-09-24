@@ -66,9 +66,6 @@ export function Events() {
                     <b className="tabular-nums">{e.stats.waSent}</b> WhatsApp
                   </span>
                   <span>
-                    <b className="tabular-nums">{e.stats.confirmed}</b> confirmaron
-                  </span>
-                  <span>
                     <b className="tabular-nums">{e.stats.checkedIn}</b> ingresaron
                   </span>
                 </div>

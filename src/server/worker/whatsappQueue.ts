@@ -21,7 +21,6 @@ import {
 const SETTINGS_KEY = 'wa_settings';
 const STATE_KEY = 'wa_state';
 const CONNECTION_KEY = 'wa_connection';
-const UNMATCHED_KEY = 'wa_unmatched';
 
 export const getSettings = () => kvGet<WaSettings>(SETTINGS_KEY, DEFAULT_SETTINGS);
 export const getState = () => kvGet<WaState>(STATE_KEY, INITIAL_STATE);
@@ -130,21 +129,6 @@ export function markSent(guestId: number): boolean {
       )
       .run(nowIso(), guestId).changes === 1
   );
-}
-
-// ── Respuestas sin emparejar (JID @lid u otro número) ───────────
-
-export interface UnmatchedReply {
-  jid: string;
-  pushName: string;
-  text: string;
-  at: string;
-}
-
-export const getUnmatched = () => kvGet<{ items: UnmatchedReply[] }>(UNMATCHED_KEY, { items: [] }).items;
-
-export function addUnmatched(reply: UnmatchedReply) {
-  kvSet(UNMATCHED_KEY, { items: [reply, ...getUnmatched()].slice(0, 30) });
 }
 
 // ── Bucle de envío ───────────────────────────────────────────────

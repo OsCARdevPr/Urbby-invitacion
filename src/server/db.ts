@@ -42,8 +42,8 @@ const migrations: string[] = [
     wa_message_id   TEXT,
     wa_sent_at      TEXT,
     wa_error        TEXT,
-    wa_replied_at   TEXT,
-    confirmed_at    TEXT,
+    wa_replied_at   TEXT, -- sin uso: era de la confirmación por WhatsApp
+    confirmed_at    TEXT, -- sin uso: era de la confirmación por WhatsApp
     checked_in_at   TEXT,
     checked_in_role TEXT,
     created_at      TEXT NOT NULL
@@ -121,7 +121,6 @@ export function eventStats(eventId: number): EventStats {
         SUM(wa_status IN ('delivered','read'))                           AS waDelivered,
         SUM(wa_status = 'read')                                          AS waRead,
         SUM(wa_status IN ('failed','no_whatsapp','uncertain'))           AS waProblems,
-        SUM(confirmed_at IS NOT NULL)                                    AS confirmed,
         SUM(checked_in_at IS NOT NULL)                                   AS checkedIn
       FROM guests WHERE event_id = ?`,
     )

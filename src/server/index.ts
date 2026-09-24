@@ -12,6 +12,7 @@ import { guestRoutes } from './routes/guests';
 import { checkinRoutes } from './routes/checkin';
 import { waRoutes, webhookUrl } from './routes/wa';
 import { publicRoutes } from './routes/public';
+import { diagnosticsRoutes } from './routes/diagnostics';
 import { handleEvolutionEvent } from './services/webhook';
 import { DEFAULT_EMAIL_SUBJECT, DEFAULT_EVENT, DEFAULT_WA_TEMPLATE, PLACEHOLDERS } from '../shared/template';
 import { emailJobStatus, recoverEmails } from './worker/emailJob';
@@ -59,6 +60,7 @@ api.route('/checkin', checkinRoutes);
 api.route('/events', eventRoutes);
 api.route('/guests', guestRoutes);
 api.route('/wa', waRoutes);
+api.route('/diagnostics', diagnosticsRoutes);
 api.get('/email/job', requireRole('admin'), (c) => c.json(emailJobStatus()));
 api.all('*', (c) => c.json({ error: 'Ruta no encontrada' }, 404));
 
