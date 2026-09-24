@@ -204,7 +204,7 @@ export const diagnosticsRoutes = new Hono<AppEnv>()
     const parsed = testSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'Datos no válidos' }, 400);
     const input = parsed.data;
-    const event = getEvent(input.eventId);
+    const event = await getEvent(input.eventId);
     if (!event) return c.json({ error: 'Elige un evento' }, 400);
     if (!input.whatsapp && !input.sendEmail) return c.json({ error: 'Elige al menos un canal' }, 400);
 

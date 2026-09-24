@@ -48,7 +48,10 @@ export function Scan() {
   const { config, logout } = useSession();
   const events = useApi<EventLite[]>('/events');
   const [eventId, setEventId] = useState<number | null>(store.get);
-  const stats = useApi<{ total: number; checkedIn: number }>(eventId ? `/checkin/stats?eventId=${eventId}` : null, 15000);
+  const stats = useApi<{ total: number; checkedIn: number; mine: number; name: string }>(
+    eventId ? `/checkin/stats?eventId=${eventId}` : null,
+    15000,
+  );
   const [shown, setShown] = useState<Shown | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -185,6 +188,15 @@ export function Scan() {
           </button>
         )}
       </header>
+      {/* Quién está registrando y cuántos lleva: se guarda en la base con cada ingreso. */}
+      <div className="relative z-20 flex items-center justify-between gap-3 bg-[#021d59]/95 px-3 pb-2 text-sm text-white/80">
+        <span className="truncate">
+          Registrando como <b className="text-white">{config.name}</b>
+        </span>
+        <span className="shrink-0 tabular-nums">
+          Llevas <b className="text-[#fab822]">{stats.data?.mine ?? 0}</b>
+        </span>
+      </div>
 
       {/* Cámara */}
       <div className="relative flex-1 overflow-hidden">
@@ -243,7 +255,7 @@ function ResultOverlay({ shown, onDismiss }: { shown: Shown; onDismiss: () => vo
     icon = <AlertTriangle className="size-16" />;
     title = 'Ya ingresó';
     guest = r.guest;
-    detail = `Entró a las ${fmtTime(r.guest.checkedInAt)} · verifica que sea la misma persona`;
+    detail = `Entró a las ${fmtTime(r.guest.checkedInAt)}${r.guest.checkedInBy ? ` (lo registró ${r.guest.checkedInBy})` : ''} · verifica que sea la misma persona`;
   } else if (r.result === 'wrong_event') {
     title = 'Es de otro evento';
     guest = r.guest;
@@ -331,7 +343,7 @@ function ManualSearch({
               <div className="truncate font-bold">{g.name}</div>
               <div className="truncate text-sm text-ink-mute">
                 {g.business || '—'}
-                {g.checkedInAt ? ` · ingresó ${fmtTime(g.checkedInAt)}` : ''}
+                {g.checkedInAt ? ` · ingresó ${fmtTime(g.checkedInAt)}${g.checkedInBy ? ` (${g.checkedInBy})` : ''}` : ''}
               </div>
             </div>
             <Button variant={g.checkedInAt ? 'secondary' : 'primary'} loading={busyId === g.id} onClick={() => void checkIn(g)}>

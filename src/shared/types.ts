@@ -48,6 +48,7 @@ export interface GuestRow {
   wa_error: string | null;
   checked_in_at: string | null;
   checked_in_role: Role | null;
+  checked_in_by: string | null; // nombre que escribió el portero al entrar
   created_at: string;
 }
 
@@ -125,4 +126,5 @@ export interface CheckinGuest {
   name: string;
   business: string;
   checkedInAt: string | null;
+  checkedInBy: string | null;
 }

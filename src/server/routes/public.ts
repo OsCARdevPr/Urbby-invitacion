@@ -35,10 +35,10 @@ const page = (title: string, body: string) => `<!doctype html>
 </html>`;
 
 export const publicRoutes = new Hono()
-  .get('/:token', (c) => {
+  .get('/:token', async (c) => {
     const token = c.req.param('token');
-    const guest = TOKEN_RE.test(token) ? getGuestByToken(token) : undefined;
-    const event = guest && getEvent(guest.event_id);
+    const guest = TOKEN_RE.test(token) ? await getGuestByToken(token) : undefined;
+    const event = guest && (await getEvent(guest.event_id));
     if (!guest || !event) {
       return c.html(page('Invitación no encontrada', '<h1>Invitación no encontrada</h1><p>Revisa que el enlace esté completo.</p>'), 404);
     }
@@ -59,8 +59,8 @@ export const publicRoutes = new Hono()
 
   .get('/:token/card.png', async (c) => {
     const token = c.req.param('token');
-    const guest = TOKEN_RE.test(token) ? getGuestByToken(token) : undefined;
-    const event = guest && getEvent(guest.event_id);
+    const guest = TOKEN_RE.test(token) ? await getGuestByToken(token) : undefined;
+    const event = guest && (await getEvent(guest.event_id));
     if (!guest || !event) return c.notFound();
     const png = await getCardPng(event, guest);
     return c.body(new Uint8Array(png), 200, { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' });

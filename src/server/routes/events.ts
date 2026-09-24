@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { requireRole, type AppEnv } from '../auth';
 import { config } from '../config';
-import { db, eventStats, getEvent, listGuests, normalizeStats, nowIso } from '../db';
+import { eventStats, getEvent, listGuests, one, query, tx } from '../db';
 import type { EventRow } from '../../shared/types';
 import { renderCardPng } from '../services/card';
 import { readGuestsFile, validateRows } from '../services/excel';
@@ -47,75 +47,74 @@ const commitSchema = z.object({
     .max(2000),
 });
 
+const EVENT_COLUMNS = ['name', 'date', 'time', 'venue', 'address', 'dress_code', 'maps_url', 'wa_template', 'email_subject'] as const;
+const eventValues = (e: z.infer<typeof eventSchema>) => EVENT_COLUMNS.map((k) => e[k]);
+
 export const eventRoutes = new Hono<AppEnv>()
   // La lista la ve también el portero, para elegir el evento en el escáner.
-  .get('/', (c) => {
-    const events = db.prepare('SELECT * FROM events ORDER BY date DESC, time DESC').all() as EventRow[];
+  .get('/', async (c) => {
+    const events = await query<EventRow>('SELECT * FROM events ORDER BY date DESC, time DESC');
     const isAdmin = c.get('role') === 'admin';
-    return c.json(
-      events.map((e) => {
-        const stats = normalizeStats(eventStats(e.id));
+    const withStats = await Promise.all(
+      events.map(async (e) => {
+        const stats = await eventStats(e.id);
         return isAdmin
           ? { ...e, stats }
           : { id: e.id, name: e.name, date: e.date, time: e.time, venue: e.venue, stats: { total: stats.total, checkedIn: stats.checkedIn } };
       }),
     );
+    return c.json(withStats);
   })
 
   .post('/', admin, async (c) => {
     const parsed = eventSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: firstError(parsed.error) }, 400);
-    const e = parsed.data;
-    const { lastInsertRowid } = db
-      .prepare(
-        `INSERT INTO events (name, date, time, venue, address, dress_code, maps_url, wa_template, email_subject, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(e.name, e.date, e.time, e.venue, e.address, e.dress_code, e.maps_url, e.wa_template, e.email_subject, nowIso());
-    return c.json(getEvent(Number(lastInsertRowid)), 201);
+    const created = await one<EventRow>(
+      `INSERT INTO events (${EVENT_COLUMNS.join(', ')}) VALUES (${EVENT_COLUMNS.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
+      eventValues(parsed.data),
+    );
+    return c.json(created, 201);
   })
 
-  .get('/:id', admin, (c) => {
-    const event = getEvent(parseId(c.req.param('id')));
+  .get('/:id', admin, async (c) => {
+    const event = await getEvent(parseId(c.req.param('id')));
     if (!event) return c.json({ error: 'Evento no encontrado' }, 404);
-    return c.json({ event, stats: normalizeStats(eventStats(event.id)) });
+    return c.json({ event, stats: await eventStats(event.id), byDoorman: await checkinsByDoorman(event.id) });
   })
 
   .put('/:id', admin, async (c) => {
     const id = parseId(c.req.param('id'));
-    if (!getEvent(id)) return c.json({ error: 'Evento no encontrado' }, 404);
     const parsed = eventSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: firstError(parsed.error) }, 400);
-    const e = parsed.data;
-    db.prepare(
-      `UPDATE events SET name = ?, date = ?, time = ?, venue = ?, address = ?, dress_code = ?, maps_url = ?,
-         wa_template = ?, email_subject = ? WHERE id = ?`,
-    ).run(e.name, e.date, e.time, e.venue, e.address, e.dress_code, e.maps_url, e.wa_template, e.email_subject, id);
-    return c.json(getEvent(id));
+    const updated = await one<EventRow>(
+      `UPDATE events SET ${EVENT_COLUMNS.map((k, i) => `${k} = $${i + 1}`).join(', ')} WHERE id = $${EVENT_COLUMNS.length + 1} RETURNING *`,
+      [...eventValues(parsed.data), id],
+    );
+    return updated ? c.json(updated) : c.json({ error: 'Evento no encontrado' }, 404);
   })
 
-  .delete('/:id', admin, (c) => {
+  .delete('/:id', admin, async (c) => {
     const id = parseId(c.req.param('id'));
-    const tokens = (db.prepare('SELECT token FROM guests WHERE event_id = ?').all(id) as { token: string }[]).map((g) => g.token);
-    db.prepare('DELETE FROM events WHERE id = ?').run(id);
+    const tokens = (await query<{ token: string }>('DELETE FROM guests WHERE event_id = $1 RETURNING token', [id])).map((g) => g.token);
+    await query('DELETE FROM events WHERE id = $1', [id]);
     removeCards(tokens);
     return c.json({ ok: true });
   })
 
-  .get('/:id/guests', admin, (c) => c.json(listGuests(parseId(c.req.param('id')))))
+  .get('/:id/guests', admin, async (c) => c.json(await listGuests(parseId(c.req.param('id')))))
 
   // ── Importación en dos pasos: vista previa (no guarda nada) y confirmación ──
 
   .post('/:id/import/preview', admin, async (c) => {
     const id = parseId(c.req.param('id'));
-    if (!getEvent(id)) return c.json({ error: 'Evento no encontrado' }, 404);
+    if (!(await getEvent(id))) return c.json({ error: 'Evento no encontrado' }, 404);
     const form = await c.req.formData().catch(() => null);
     const file = form?.get('file');
     if (!(file instanceof File)) return c.json({ error: 'Sube un archivo Excel (.xlsx) o CSV' }, 400);
     if (file.size > 5 * 1024 * 1024) return c.json({ error: 'El archivo pesa más de 5 MB' }, 400);
     try {
       const raw = await readGuestsFile(await file.arrayBuffer());
-      return c.json({ rows: validateRows(raw, existingContacts(id)) });
+      return c.json({ rows: validateRows(raw, await existingContacts(id)) });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
@@ -123,48 +122,47 @@ export const eventRoutes = new Hono<AppEnv>()
 
   .post('/:id/import/commit', admin, async (c) => {
     const id = parseId(c.req.param('id'));
-    if (!getEvent(id)) return c.json({ error: 'Evento no encontrado' }, 404);
+    if (!(await getEvent(id))) return c.json({ error: 'Evento no encontrado' }, 404);
     const parsed = commitSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'Datos de importación no válidos' }, 400);
 
     // Se vuelve a validar en el servidor: el panel solo propone las filas.
     const rows = validateRows(
       parsed.data.rows.map((r) => ({ row: r.row, name: r.name.trim(), business: r.business.trim(), phone: r.phone ?? '', email: r.email ?? '' })),
-      existingContacts(id),
+      await existingContacts(id),
     ).filter((r) => r.status === 'ok' || r.status === 'warning');
 
-    const insert = db.prepare(
-      `INSERT INTO guests (event_id, name, business, phone, email, token, email_status, wa_status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const now = nowIso();
-    db.transaction(() => {
+    await tx(async (client) => {
       for (const r of rows) {
-        insert.run(id, r.name, r.business, r.phone, r.email, nanoid(21), r.email ? 'pending' : 'skipped', r.phone ? 'pending' : 'skipped', now);
+        await client.query(
+          `INSERT INTO guests (event_id, name, business, phone, email, token, email_status, wa_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, r.name, r.business, r.phone, r.email, nanoid(21), r.email ? 'pending' : 'skipped', r.phone ? 'pending' : 'skipped'],
+        );
       }
-    })();
+    });
     return c.json({ inserted: rows.length });
   })
 
-  .get('/:id/contacts.vcf', admin, (c) => {
-    const event = getEvent(parseId(c.req.param('id')));
+  .get('/:id/contacts.vcf', admin, async (c) => {
+    const event = await getEvent(parseId(c.req.param('id')));
     if (!event) return c.json({ error: 'Evento no encontrado' }, 404);
-    const vcf = guestsToVcf(listGuests(event.id), `Invitado a ${event.name}`);
+    const vcf = guestsToVcf(await listGuests(event.id), `Invitado a ${event.name}`);
     return c.body(vcf, 200, {
       'Content-Type': 'text/vcard; charset=utf-8',
       'Content-Disposition': `attachment; filename="invitados-${event.id}.vcf"`,
     });
   })
 
-  .post('/:id/email/send-pending', admin, (c) => {
-    const result = startEmailJob(parseId(c.req.param('id')));
+  .post('/:id/email/send-pending', admin, async (c) => {
+    const result = await startEmailJob(parseId(c.req.param('id')));
     return 'error' in result ? c.json(result, 400) : c.json(result);
   })
 
-  .post('/:id/wa/enqueue', admin, (c) => {
+  .post('/:id/wa/enqueue', admin, async (c) => {
     const id = parseId(c.req.param('id'));
-    if (!getEvent(id)) return c.json({ error: 'Evento no encontrado' }, 404);
-    return c.json({ queued: enqueueEvent(id) });
+    if (!(await getEvent(id))) return c.json({ error: 'Evento no encontrado' }, 404);
+    return c.json({ queued: await enqueueEvent(id) });
   })
 
   // Vista previa de la tarjeta con los datos del formulario (aún sin guardar).
@@ -184,8 +182,17 @@ export const eventRoutes = new Hono<AppEnv>()
     return c.body(new Uint8Array(png), 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
   });
 
-function existingContacts(eventId: number) {
-  const rows = db.prepare('SELECT phone, email FROM guests WHERE event_id = ?').all(eventId) as { phone: string | null; email: string | null }[];
+/** Cuántos ingresos registró cada portero en este evento (el nombre que escribió al entrar). */
+export const checkinsByDoorman = (eventId: number) =>
+  query<{ name: string; count: number }>(
+    `SELECT COALESCE(checked_in_by, 'Sin nombre') AS name, count(*) AS count
+     FROM guests WHERE event_id = $1 AND checked_in_at IS NOT NULL
+     GROUP BY 1 ORDER BY 2 DESC, 1`,
+    [eventId],
+  );
+
+async function existingContacts(eventId: number) {
+  const rows = await query<{ phone: string | null; email: string | null }>('SELECT phone, email FROM guests WHERE event_id = $1', [eventId]);
   return {
     phones: new Set(rows.map((r) => r.phone).filter((p): p is string => Boolean(p))),
     emails: new Set(rows.map((r) => r.email).filter((e): e is string => Boolean(e))),

@@ -30,16 +30,16 @@ export const webhookUrl = () => `${config.publicBaseUrl}/api/webhooks/evolution/
 
 export const waRoutes = new Hono<AppEnv>()
   .use('*', requireRole('admin'))
-  .get('/status', (c) => c.json(waStatus()))
+  .get('/status', async (c) => c.json(await waStatus()))
 
-  .post('/start', (c) => {
-    const error = startCampaign();
-    return error ? c.json({ error }, 400) : c.json(waStatus());
+  .post('/start', async (c) => {
+    const error = await startCampaign();
+    return error ? c.json({ error }, 400) : c.json(await waStatus());
   })
 
-  .post('/pause', (c) => {
-    pauseCampaign();
-    return c.json(waStatus());
+  .post('/pause', async (c) => {
+    await pauseCampaign();
+    return c.json(await waStatus());
   })
 
   .put('/settings', async (c) => {
@@ -47,8 +47,8 @@ export const waRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: 'Ajustes no válidos' }, 400);
     const error = validateSettings(parsed.data);
     if (error) return c.json({ error }, 400);
-    saveSettings(parsed.data);
-    return c.json(waStatus());
+    await saveSettings(parsed.data);
+    return c.json(await waStatus());
   })
 
   // Consulta en vivo a Evolution, a pedido del panel.
@@ -56,7 +56,7 @@ export const waRoutes = new Hono<AppEnv>()
     if (!evolutionConfigured()) return c.json({ state: 'no configurado' });
     try {
       const state = await connectionState();
-      setConnection(state);
+      await setConnection(state);
       return c.json({ state });
     } catch (err) {
       return c.json({ state: 'error', error: (err as Error).message });

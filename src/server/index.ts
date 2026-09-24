@@ -5,7 +5,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import { assertConfig, config, evolutionConfigured, publicUrlIsLocal, resendConfigured } from './config';
-import { db } from './db';
+import { initDb, pool } from './db';
 import { authRoutes, requireRole, type AppEnv } from './auth';
 import { eventRoutes } from './routes/events';
 import { guestRoutes } from './routes/guests';
@@ -33,7 +33,7 @@ api.post('/webhooks/evolution/:secret', async (c) => {
     return c.json({ ok: true, ignored: 'otra instancia' });
   }
   try {
-    handleEvolutionEvent(String(body.event ?? ''), body.data);
+    await handleEvolutionEvent(String(body.event ?? ''), body.data);
   } catch (err) {
     console.error('[webhook] error procesando evento', body.event, err);
   }
@@ -46,6 +46,7 @@ api.get('/config', (c) => {
   const isAdmin = c.get('role') === 'admin';
   return c.json({
     role: c.get('role'),
+    name: c.get('staffName'),
     evolutionConfigured: evolutionConfigured(),
     resendConfigured: resendConfigured(),
     publicBaseUrl: config.publicBaseUrl,
@@ -84,8 +85,20 @@ if (fs.existsSync(indexHtml)) {
   app.get('*', (c) => c.html(html));
 }
 
-recoverEmails();
-startWorker();
+// Crea o actualiza las tablas antes de aceptar peticiones. Postgres puede tardar unos segundos
+// en aceptar conexiones cuando arranca junto con la app (docker compose): se reintenta.
+for (let attempt = 1; ; attempt++) {
+  try {
+    await initDb();
+    break;
+  } catch (err) {
+    if (attempt >= 15) throw err;
+    console.warn(`[db] esperando a Postgres (${(err as Error).message})…`);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+await recoverEmails();
+await startWorker();
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`Invitaciones Urbby escuchando en http://localhost:${info.port}`);
@@ -103,7 +116,7 @@ async function shutdown(signal: string) {
   console.log(`[${signal}] cerrando…`);
   await Promise.race([stopWorker(), new Promise((r) => setTimeout(r, 8000))]);
   server.close();
-  db.close();
+  await pool.end();
   process.exit(0);
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

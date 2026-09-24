@@ -37,7 +37,7 @@ export function EventDetail() {
   const { id } = useParams();
   const { config } = useSession();
   const toast = useToast();
-  const detail = useApi<{ event: EventRow; stats: EventStats }>(`/events/${id}`, 8000);
+  const detail = useApi<{ event: EventRow; stats: EventStats; byDoorman: { name: string; count: number }[] }>(`/events/${id}`, 8000);
   const guests = useApi<GuestRow[]>(`/events/${id}/guests`, 8000);
   const [startedJobId, setStartedJobId] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -70,7 +70,7 @@ export function EventDetail() {
 
   if (detail.error) return <Notice tone="bad">{detail.error}</Notice>;
   if (!detail.data) return <Spinner />;
-  const { event, stats } = detail.data;
+  const { event, stats, byDoorman } = detail.data;
   const all = guests.data ?? [];
   const emailPending = all.filter((g) => g.email && g.email_status === 'pending').length;
   const waPending = all.filter((g) => g.phone && g.wa_status === 'pending').length;
@@ -122,7 +122,12 @@ export function EventDetail() {
         <Stat label="Invitados" value={stats.total} />
         <Stat label="Correos" value={stats.emailSent} hint={stats.emailFailed ? `${stats.emailFailed} fallaron` : 'enviados'} />
         <Stat label="WhatsApp" value={stats.waSent} hint={`${stats.waRead} leídos · ${stats.waQueued} en cola`} />
-        <Stat label="Ingresaron" value={stats.checkedIn} accent />
+        <Stat
+          label="Ingresaron"
+          value={stats.checkedIn}
+          accent
+          hint={byDoorman.length ? byDoorman.map((d) => `${d.name}: ${d.count}`).join(' · ') : undefined}
+        />
       </div>
 
       {/* Pasos en el orden en que se hacen */}
@@ -244,7 +249,14 @@ export function EventDetail() {
                   <td className="px-4 py-3">
                     <StatusBadge map={WA_LABEL} status={g.wa_status} error={g.wa_error} />
                   </td>
-                  <td className="px-4 py-3 tabular-nums">{g.checked_in_at ? <b className="text-ok">{fmtTime(g.checked_in_at)}</b> : <span className="text-ink-mute">—</span>}</td>
+                  <td className="px-4 py-3 tabular-nums">{g.checked_in_at ? (
+                      <>
+                        <b className="text-ok">{fmtTime(g.checked_in_at)}</b>
+                        {g.checked_in_by ? <div className="text-xs text-ink-mute">{g.checked_in_by}</div> : null}
+                      </>
+                    ) : (
+                      <span className="text-ink-mute">—</span>
+                    )}</td>
                 </tr>
               ))}
             </tbody>
@@ -260,7 +272,12 @@ export function EventDetail() {
                       <div className="truncate font-bold">{g.name}</div>
                       <div className="truncate text-sm text-ink-mute">{g.business || formatPhone(g.phone)}</div>
                     </div>
-                    {g.checked_in_at ? <Badge tone="ok">Ingresó {fmtTime(g.checked_in_at)}</Badge> : null}
+                    {g.checked_in_at ? (
+                      <Badge tone="ok">
+                        Ingresó {fmtTime(g.checked_in_at)}
+                        {g.checked_in_by ? ` · ${g.checked_in_by}` : ''}
+                      </Badge>
+                    ) : null}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <StatusBadge map={EMAIL_LABEL} status={g.email_status} prefix="Correo" />

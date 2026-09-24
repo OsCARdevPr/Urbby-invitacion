@@ -166,7 +166,9 @@ export function GuestModal({
               <h3 className="mr-auto font-bold">
                 Asistencia
                 <span className="block text-sm font-normal text-ink-mute">
-                  {g.checked_in_at ? `Ingresó ${fmtDateTime(g.checked_in_at)}` : 'Aún no ingresa'}
+                  {g.checked_in_at
+                    ? `Ingresó ${fmtDateTime(g.checked_in_at)}${g.checked_in_by ? ` · lo registró ${g.checked_in_by}` : ''}`
+                    : 'Aún no ingresa'}
                 </span>
               </h3>
               {g.checked_in_at ? (

@@ -1,4 +1,4 @@
-import { db } from '../db';
+import { exec, one } from '../db';
 import type { GuestRow, WaStatus } from '../../shared/types';
 import { getState, pauseCampaign, setConnection } from '../worker/whatsappQueue';
 
@@ -22,34 +22,32 @@ export function mapAck(status: unknown): 'sent' | 'delivered' | 'read' | null {
   return null;
 }
 
-export function handleMessagesUpdate(data: unknown) {
-  const find = db.prepare(`SELECT id, wa_status FROM guests WHERE wa_message_id = ?`);
-  const update = db.prepare(`UPDATE guests SET wa_status = ? WHERE id = ?`);
+export async function handleMessagesUpdate(data: unknown) {
   for (const d of asArray(data)) {
     const status = mapAck(d.status ?? d.update?.status);
     if (!status) continue;
     const ids = [d.keyId, d.key?.id, d.messageId].filter((v): v is string => typeof v === 'string');
     for (const id of ids) {
-      const guest = find.get(id) as Pick<GuestRow, 'id' | 'wa_status'> | undefined;
+      const guest = await one<Pick<GuestRow, 'id' | 'wa_status'>>(`SELECT id, wa_status FROM guests WHERE wa_message_id = $1`, [id]);
       if (!guest) continue;
       // Solo avanza (enviado → entregado → leído); un ack atrasado no hace retroceder el estado.
       const current = RANK[guest.wa_status];
-      if (current !== undefined && RANK[status]! > current) update.run(status, guest.id);
+      if (current !== undefined && RANK[status]! > current) await exec(`UPDATE guests SET wa_status = $1 WHERE id = $2`, [status, guest.id]);
       break;
     }
   }
 }
 
-export function handleConnectionUpdate(data: unknown) {
+export async function handleConnectionUpdate(data: unknown) {
   const state = String((data as Json)?.state ?? 'unknown');
-  setConnection(state);
-  if (state === 'close' && getState().running) {
-    pauseCampaign('WhatsApp se desconectó. Vuelve a vincular el número en Evolution y reanuda.');
+  await setConnection(state);
+  if (state === 'close' && (await getState()).running) {
+    await pauseCampaign('WhatsApp se desconectó. Vuelve a vincular el número en Evolution y reanuda.');
   }
 }
 
-export function handleEvolutionEvent(event: string, data: unknown) {
+export async function handleEvolutionEvent(event: string, data: unknown) {
   const name = event.toLowerCase().replace(/_/g, '.');
-  if (name === 'messages.update') handleMessagesUpdate(data);
-  else if (name === 'connection.update') handleConnectionUpdate(data);
+  if (name === 'messages.update') await handleMessagesUpdate(data);
+  else if (name === 'connection.update') await handleConnectionUpdate(data);
 }

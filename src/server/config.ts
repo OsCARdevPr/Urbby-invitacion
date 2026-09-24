@@ -9,6 +9,9 @@ export const config = {
   // API_PORT gana sobre PORT: en desarrollo algunas herramientas definen PORT para Vite (5173)
   // y la API tiene que seguir en el 3000, que es a donde apunta el proxy de Vite.
   port: Number(env('API_PORT') || env('PORT', '3000')),
+  // Postgres. En Docker lo arma docker-compose; fuera de Docker apunta al puerto publicado (5440).
+  databaseUrl: env('DATABASE_URL', 'postgres://urbby:urbby@localhost:5440/invitaciones'),
+  // Solo caché de tarjetas generadas: se puede borrar, se regeneran solas.
   dataDir: path.resolve(env('DATA_DIR', './data')),
   assetsDir: path.resolve('assets'),
   webDir: path.resolve('dist/web'),

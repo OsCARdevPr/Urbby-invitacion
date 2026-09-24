@@ -1,5 +1,5 @@
 import { LOCAL_URL_BLOCK, publicUrlIsLocal, resendConfigured } from '../config';
-import { db, getEvent, nowIso } from '../db';
+import { exec, getEvent, nowIso, query } from '../db';
 import type { EventRow, GuestRow } from '../../shared/types';
 import { getCardPng } from '../services/card';
 import { sendInvitationEmail } from '../services/email';
@@ -24,12 +24,12 @@ export const emailJobStatus = () => job;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Al arrancar, un "sending" es un correo interrumpido: se reintenta sin riesgo gracias a la clave de idempotencia. */
-export function recoverEmails() {
-  db.prepare(`UPDATE guests SET email_status = 'pending' WHERE email_status = 'sending'`).run();
+export async function recoverEmails() {
+  await exec(`UPDATE guests SET email_status = 'pending' WHERE email_status = 'sending'`);
 }
 
 export async function sendOneEmail(event: EventRow, guest: GuestRow, idempotencyKey: string) {
-  db.prepare(`UPDATE guests SET email_status = 'sending' WHERE id = ?`).run(guest.id);
+  await exec(`UPDATE guests SET email_status = 'sending' WHERE id = $1`, [guest.id]);
   try {
     const png = await getCardPng(event, guest);
     for (let attempt = 1; ; attempt++) {
@@ -45,26 +45,34 @@ export async function sendOneEmail(event: EventRow, guest: GuestRow, idempotency
         throw err;
       }
     }
-    db.prepare(`UPDATE guests SET email_status = 'sent', email_sent_at = ?, email_error = NULL WHERE id = ?`).run(nowIso(), guest.id);
+    await exec(`UPDATE guests SET email_status = 'sent', email_sent_at = $1, email_error = NULL WHERE id = $2`, [nowIso(), guest.id]);
   } catch (err) {
-    db.prepare(`UPDATE guests SET email_status = 'failed', email_error = ? WHERE id = ?`).run((err as Error).message, guest.id);
+    await exec(`UPDATE guests SET email_status = 'failed', email_error = $1 WHERE id = $2`, [(err as Error).message, guest.id]);
     throw err;
   }
 }
 
 /** Devuelve el id del trabajo iniciado, o un mensaje de error. */
-export function startEmailJob(eventId: number): { id: number } | { error: string } {
+export async function startEmailJob(eventId: number): Promise<{ id: number } | { error: string }> {
   if (job.running) return { error: 'Ya hay un envío de correos en curso.' };
   if (publicUrlIsLocal()) return { error: LOCAL_URL_BLOCK };
   if (!resendConfigured()) return { error: 'Configura RESEND_API_KEY antes de enviar correos.' };
-  const event = getEvent(eventId);
-  if (!event) return { error: 'Evento no encontrado.' };
-  const guests = db
-    .prepare(`SELECT * FROM guests WHERE event_id = ? AND email IS NOT NULL AND email_status = 'pending' ORDER BY id`)
-    .all(eventId) as GuestRow[];
-  if (guests.length === 0) return { error: 'No hay correos pendientes en este evento.' };
+  // Se marca como en curso antes de consultar, para que dos clics seguidos no arranquen dos envíos.
+  const previous = job;
+  job = { ...job, id: job.id + 1, running: true, eventId, total: 0, done: 0, failed: 0, lastError: null, finishedAt: null };
+  const event = await getEvent(eventId);
+  const guests = event
+    ? await query<GuestRow>(
+        `SELECT * FROM guests WHERE event_id = $1 AND email IS NOT NULL AND email_status = 'pending' ORDER BY id`,
+        [eventId],
+      )
+    : [];
+  if (!event || guests.length === 0) {
+    job = previous;
+    return { error: event ? 'No hay correos pendientes en este evento.' : 'Evento no encontrado.' };
+  }
 
-  job = { id: job.id + 1, running: true, eventId, total: guests.length, done: 0, failed: 0, lastError: null, finishedAt: null };
+  job.total = guests.length;
   void run(event, guests);
   return { id: job.id };
 }

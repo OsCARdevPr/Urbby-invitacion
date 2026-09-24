@@ -7,8 +7,8 @@ App para las invitaciones del prelaunch de Urbby:
 3. La envía por **correo** (Resend) y por **WhatsApp** (Evolution API), a un ritmo lento para cuidar el número.
 4. En la puerta, el portero **escanea el QR** con el celular y la app marca el ingreso.
 
-Stack: Node 22 + Hono + SQLite (servidor), React + Vite + Tailwind (panel), satori + resvg (tarjetas).
-Todo corre en **un solo contenedor**.
+Stack: Node 22 + Hono (API), React + Vite + Tailwind (panel), **Postgres** (datos), satori + resvg (tarjetas).
+Todo corre en **Docker**: un contenedor con la base de datos y otro con la app (la API y el panel web salen del mismo servidor).
 
 ---
 
@@ -26,7 +26,9 @@ Todo corre en **un solo contenedor**.
 4. **Envía los correos.** Salen a todos de una vez y le piden al invitado que guarde el número de WhatsApp.
 5. **Encola por WhatsApp** y ve a *WhatsApp → Empezar*. La campaña envía de a uno, con pausas al azar, solo en horario y hasta
    el tope diario.
-6. **Día del evento.** El portero entra con su contraseña, que lo lleva directo al escáner. Resultados:
+6. **Día del evento.** Cada portero entra con **su nombre** y la contraseña de portero (no hay cuentas que crear) y va directo
+   al escáner. Cada ingreso queda guardado con quién lo registró: el escáner muestra cuántos lleva cada uno, y el panel, el
+   total por portero. Resultados:
    - 🟢 **Bienvenido/a:** ingreso registrado.
    - 🟡 **Ya ingresó:** verificar que sea la misma persona.
    - 🔴 **QR no válido o de otro evento.**
@@ -72,17 +74,39 @@ Luego abre WhatsApp y espera a que se sincronicen los contactos.
 
 ---
 
-## Desarrollo local
+## Levantar todo con Docker
+
+Necesitas Docker Desktop encendido. La primera vez, crea el `.env` a partir de la plantilla y ajusta las contraseñas (si ya
+tienes un `.env`, no lo copies encima: perderías tus claves):
 
 ```bash
-npm install
-cp .env.example .env      # en desarrollo puedes dejar las contraseñas vacías: admin / portero
-npm run dev               # panel en http://localhost:5173 · API en :3000
-npm test                  # pruebas de la lógica (teléfonos, Excel, ritmo, webhook…)
+cp .env.example .env
 ```
 
-La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa la app desplegada, o un túnel HTTPS como
-`cloudflared tunnel --url http://localhost:5173`.
+Luego levanta la base de datos y la app:
+
+```bash
+docker compose up -d --build
+```
+
+Entra a **http://localhost:3000**.
+
+| Comando | Qué hace |
+|---|---|
+| `docker compose logs -f app` | Ver lo que pasa en la app |
+| `docker compose restart app` | Reiniciar la app (por ejemplo, después de cambiar el `.env`) |
+| `docker compose up -d --build` | Reconstruir después de cambiar el código |
+| `docker compose down` | Apagar todo. **Los datos se conservan** en el volumen `pgdata` |
+
+Los datos (eventos, invitados, ingresos y ajustes) viven en **Postgres**. El contenedor de la app no guarda nada importante.
+
+### Desarrollo con recarga automática (opcional)
+
+Con la base de Docker encendida (`docker compose up -d db`), puedes correr la app fuera de Docker con `npm install` y luego
+`npm run dev`: la API queda en :3000 y el panel en http://localhost:5173. Las pruebas de la lógica se corren con `npm test`.
+
+La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa la app desplegada, o un túnel HTTPS hacia
+`http://localhost:3000`.
 
 ---
 
@@ -90,25 +114,24 @@ La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa l
 
 1. El código vive en **https://github.com/OsCARdevPr/Urbby-invitacion** (rama `main`). No subas nunca la lista real de
    invitados ni el `.env`: tienen datos personales y claves (el `.gitignore` ya los excluye).
-2. En Dokploy crea una **Application**:
+2. En Dokploy crea un servicio **Compose**:
    - *Source:* el repositorio de GitHub, rama `main`.
-   - *Build type:* **Dockerfile**.
-3. En *Environment* define las variables (ver `.env.example`). Como mínimo:
+   - *Compose path:* `docker-compose.yml`.
+3. En *Environment* pega las variables de `.env.example` con los valores reales. Como mínimo:
    - Acceso: `ADMIN_PASSWORD`, `DOORMAN_PASSWORD`, `SESSION_SECRET`.
+   - Base de datos: `POSTGRES_PASSWORD` (una clave larga). `DATABASE_URL` la arma el compose solo.
    - URL pública: `PUBLIC_BASE_URL=https://invitaciones.urbby.app`.
    - Evolution: `EVOLUTION_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `WEBHOOK_SECRET`, `SENDER_PHONE_DISPLAY`.
    - Resend: `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO`.
 
-   Si Evolution corre en el mismo Dokploy, en `EVOLUTION_URL` puedes usar el nombre interno del servicio, por ejemplo
-   `http://evolution-api:8080`.
-4. En *Advanced → Volumes / Mounts* agrega un **Volume Mount** en `/app/data`. Ahí viven la base de datos y las tarjetas; sin el
-   volumen se pierden en cada deploy. Usa un *Volume Mount* y no un *Bind Mount*: la app corre como el usuario `node`, y una
-   carpeta del host montada con bind suele quedar de root y sin permiso de escritura.
-5. En *Domains*:
-   - Agrega `invitaciones.urbby.app`, puerto **3000**, con HTTPS (Let's Encrypt).
+   Define `POSTGRES_PASSWORD` **antes del primer deploy**: Postgres la fija al crear la base y después no la cambia.
+4. En *Domains*:
+   - Agrega `invitaciones.urbby.app` → servicio **app**, puerto **3000**, con HTTPS (Let's Encrypt).
    - En el DNS de urbby.app crea un registro **A** `invitaciones` → IP del VPS.
-6. **Deploy.** Luego entra al panel → *WhatsApp* → **Configurar en Evolution**, que apunta el webhook de la instancia a la
+5. **Deploy.** Luego entra al panel → *WhatsApp* → **Configurar en Evolution**, que apunta el webhook de la instancia a la
    app para recibir los estados de entrega y lectura. Hazlo **después** de tener el dominio con HTTPS.
+
+Los datos quedan en el volumen de Postgres del compose y sobreviven a cada deploy.
 
 > Mientras `PUBLIC_BASE_URL` apunte a `localhost` (desarrollo), los envíos masivos de correo y WhatsApp están bloqueados:
 > esas invitaciones no servirían en la puerta. Sí se puede enviar a un invitado puntual desde su ficha, para probar.
@@ -134,7 +157,7 @@ assets/                 logo, trazos y fuentes de la tarjeta
 src/shared/             tipos y plantillas compartidos por servidor y panel
 src/server/
   index.ts              servidor Hono: API, webhook, página pública /i/:token, panel
-  db.ts                 SQLite + migraciones
+  db.ts                 Postgres + migraciones
   auth.ts               login admin / portero (cookie firmada)
   routes/               events, guests, checkin, wa, public
   services/             card (tarjeta), excel, phone, email, evolution, webhook, vcf, qr

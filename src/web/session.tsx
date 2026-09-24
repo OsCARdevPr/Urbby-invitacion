@@ -3,6 +3,8 @@ import type { Role } from '../shared/types';
 
 export interface AppConfig {
   role: Role;
+  /** Nombre que escribió al entrar (los porteros quedan registrados en cada ingreso). */
+  name: string;
   evolutionConfigured: boolean;
   resendConfigured: boolean;
   publicBaseUrl: string;
