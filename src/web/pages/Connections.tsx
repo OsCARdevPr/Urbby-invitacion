@@ -4,6 +4,7 @@ import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { WhatsAppPreview } from '../components/CardPreview';
 import { Button, Card, cx, Field, inputClass, Notice, Spinner, useToast } from '../components/ui';
+import { pickCurrentEvent } from '../lib';
 import { useSession } from '../session';
 import type { EventRow } from '../../shared/types';
 
@@ -162,7 +163,8 @@ function TestSend({ whatsappReady, emailReady }: { whatsappReady: boolean; email
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (eventId === null && events.data?.length) setEventId(events.data[0].id);
+    const current = eventId === null && events.data ? pickCurrentEvent(events.data) : undefined;
+    if (current) setEventId(current.id);
   }, [events.data, eventId]);
 
   const event = events.data?.find((e) => e.id === eventId);

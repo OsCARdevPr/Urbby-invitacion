@@ -4,7 +4,7 @@ import QrScanner from 'qr-scanner';
 import { AlertTriangle, CheckCircle2, LayoutDashboard, LogOut, Search, XCircle } from 'lucide-react';
 import { api, useApi } from '../api';
 import { Button, inputClass, Modal } from '../components/ui';
-import { fmtTime } from '../lib';
+import { fmtTime, pickCurrentEvent } from '../lib';
 import { useSession } from '../session';
 import type { CheckinGuest, CheckinResult } from '../../shared/types';
 
@@ -17,7 +17,6 @@ interface EventLite {
 
 type Shown = CheckinResult | { result: 'not_invitation' } | { result: 'error'; message: string };
 
-const STORAGE_KEY = 'urbby:scan-event';
 const TOKEN_IN_URL = /\/i\/([A-Za-z0-9_-]{21})(?:[/?#]|$)/;
 const BARE_TOKEN = /^[A-Za-z0-9_-]{21}$/;
 
@@ -27,27 +26,10 @@ export function extractToken(text: string): string | null {
   return t.match(TOKEN_IN_URL)?.[1] ?? (BARE_TOKEN.test(t) ? t : null);
 }
 
-const store = {
-  get: () => {
-    try {
-      return Number(localStorage.getItem(STORAGE_KEY)) || null;
-    } catch {
-      return null;
-    }
-  },
-  set: (id: number) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, String(id));
-    } catch {
-      /* sin almacenamiento: se elige de nuevo al recargar */
-    }
-  },
-};
-
 export function Scan() {
   const { config, logout } = useSession();
   const events = useApi<EventLite[]>('/events');
-  const [eventId, setEventId] = useState<number | null>(store.get);
+  const [eventId, setEventId] = useState<number | null>(null);
   const stats = useApi<{ total: number; checkedIn: number; mine: number; name: string }>(
     eventId ? `/checkin/stats?eventId=${eventId}` : null,
     15000,
@@ -62,20 +44,19 @@ export function Scan() {
   const ignore = useRef<{ key: string; until: number } | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Evento por defecto: el guardado, o el próximo a partir de hoy, o el más reciente.
+  // Evento por defecto: el de hoy según la base (o el próximo). No se recuerda en el navegador,
+  // para que un celular que se usó en un evento anterior no se quede pegado en esa lista.
   useEffect(() => {
     const list = events.data;
     if (!list?.length) return;
     if (eventId && list.some((e) => e.id === eventId)) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const upcoming = [...list].filter((e) => e.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
-    choose((upcoming ?? list[0]).id);
+    const current = pickCurrentEvent(list);
+    if (current) choose(current.id);
   }, [events.data, eventId]);
 
   const choose = (id: number) => {
     setEventId(id);
     eventIdRef.current = id;
-    store.set(id);
   };
 
   const dismiss = useCallback(() => {

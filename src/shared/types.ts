@@ -79,6 +79,8 @@ export interface WaSettings {
 }
 
 export interface WaState {
+  /** Evento que envía la campaña. Solo se envía a los invitados en cola de este evento. */
+  eventId: number | null;
   running: boolean;
   pauseReason: string | null;
   nextSendAt: number; // epoch ms
@@ -93,7 +95,10 @@ export interface WaState {
 export interface WaStatusResponse {
   state: WaState;
   settings: WaSettings;
+  /** En cola del evento de la campaña. */
   queued: number;
+  /** En cola de cada evento, para elegir cuál enviar. */
+  queuedByEvent: { eventId: number; name: string; date: string; queued: number }[];
   sentToday: number;
   inWindow: boolean;
   nowLocal: string;

@@ -52,6 +52,17 @@ export function fmtDuration(ms: number): string {
   return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
 }
 
+/**
+ * El evento "actual" según las fechas guardadas en la base: el de hoy; si no hay, el próximo;
+ * si ya pasaron todos, el más reciente. Así nada depende de lo que recuerde cada navegador.
+ */
+export function pickCurrentEvent<T extends { id: number; date: string }>(events: T[]): T | undefined {
+  if (events.length === 0) return undefined;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/El_Salvador' }).format(new Date());
+  const byDate = [...events].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  return byDate.find((e) => e.date === today) ?? byDate.find((e) => e.date > today) ?? byDate[byDate.length - 1];
+}
+
 /** Minúsculas y sin acentos, para buscar. */
 export const fold = (s: string) =>
   s

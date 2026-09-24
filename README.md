@@ -24,8 +24,9 @@ Todo corre en **Docker**: un contenedor con la base de datos y otro con la app (
    - Los teléfonos de 8 dígitos se asumen de El Salvador (+503).
 3. **Descarga los contactos (.vcf)** e impórtalos en el teléfono del número secundario (ver abajo).
 4. **Envía los correos.** Salen a todos de una vez y le piden al invitado que guarde el número de WhatsApp.
-5. **Encola por WhatsApp** y ve a *WhatsApp → Empezar*. La campaña envía de a uno, con pausas al azar, solo en horario y hasta
-   el tope diario.
+5. **Encola por WhatsApp** y ve a *WhatsApp*, elige el **evento a enviar** y pulsa *Empezar*. La campaña envía un evento a la
+   vez (las listas no se mezclan), de a uno, con pausas al azar, solo en horario y hasta el tope diario, que es uno solo para
+   todos los eventos porque todo sale del mismo número.
 6. **Día del evento.** Cada portero entra con **su nombre** y la contraseña de portero (no hay cuentas que crear) y va directo
    al escáner. Cada ingreso queda guardado con quién lo registró: el escáner muestra cuántos lleva cada uno, y el panel, el
    total por portero. Resultados:

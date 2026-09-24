@@ -1,5 +1,5 @@
 import { config, evolutionConfigured, LOCAL_URL_BLOCK, publicUrlIsLocal } from '../config';
-import { exec, getEvent, kvGet, kvSet, nowIso, one } from '../db';
+import { exec, getEvent, kvGet, kvSet, nowIso, one, query } from '../db';
 import type { GuestRow, WaSettings, WaState, WaStatusResponse } from '../../shared/types';
 import { getCardPng } from '../services/card';
 import { connectionState, EvolutionError, sendImage } from '../services/evolution';
@@ -43,7 +43,18 @@ async function saveState(patch: Partial<WaState>): Promise<WaState> {
 export const setConnection = (state: string) => kvSet(CONNECTION_KEY, { state, checkedAt: nowIso() });
 export const getConnection = () => kvGet<{ state: string; checkedAt: string | null }>(CONNECTION_KEY, { state: 'unknown', checkedAt: null });
 
-const queuedCount = async () => (await one<{ n: number }>(`SELECT count(*) AS n FROM guests WHERE wa_status = 'queued'`))!.n;
+/** En cola de un evento. La campaña envía un evento a la vez, así las listas nunca se mezclan. */
+const queuedCount = async (eventId: number | null) =>
+  eventId === null
+    ? 0
+    : (await one<{ n: number }>(`SELECT count(*) AS n FROM guests WHERE wa_status = 'queued' AND event_id = $1`, [eventId]))!.n;
+
+const queuedByEvent = () =>
+  query<{ eventId: number; name: string; date: string; queued: number }>(
+    `SELECT e.id AS "eventId", e.name, e.date, count(g.id) AS queued
+     FROM events e LEFT JOIN guests g ON g.event_id = e.id AND g.wa_status = 'queued'
+     GROUP BY e.id ORDER BY e.date, e.id`,
+  );
 
 /** Mensajes enviados hoy (hora de El Salvador) desde este número, sumando todos los eventos. */
 const sentToday = async () =>
@@ -54,13 +65,21 @@ const sentToday = async () =>
   ))!.n;
 
 export async function waStatus(): Promise<WaStatusResponse> {
-  const [state, settings, queued, sent, connection] = await Promise.all([getState(), getSettings(), queuedCount(), sentToday(), getConnection()]);
+  const state = await getState();
+  const [settings, queued, byEvent, sent, connection] = await Promise.all([
+    getSettings(),
+    queuedCount(state.eventId),
+    queuedByEvent(),
+    sentToday(),
+    getConnection(),
+  ]);
   const now = Date.now();
   const { date, time } = localParts(new Date(now), config.tz);
   return {
     state,
     settings,
     queued,
+    queuedByEvent: byEvent,
     sentToday: sent,
     inWindow: inWindow(time, settings.windowStart, settings.windowEnd),
     nowLocal: `${date} ${time}`,
@@ -71,13 +90,21 @@ export async function waStatus(): Promise<WaStatusResponse> {
 
 // ── Control ──────────────────────────────────────────────────────
 
-export async function startCampaign(): Promise<string | null> {
+export async function startCampaign(eventId: number): Promise<string | null> {
   if (!evolutionConfigured()) return 'Configura EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE antes de empezar.';
   if (publicUrlIsLocal()) return LOCAL_URL_BLOCK;
-  if ((await queuedCount()) === 0) return 'No hay invitados en la cola. Encola primero a los de un evento.';
+  const event = Number.isInteger(eventId) && eventId > 0 ? await getEvent(eventId) : undefined;
+  if (!event) return 'Elige el evento que quieres enviar.';
+  if ((await queuedCount(eventId)) === 0) return `No hay invitados en la cola de "${event.name}". Encólalos desde el evento.`;
   const state = await getState();
   // Reanudar no se salta la pausa que estaba corriendo: pausar y reanudar no debe acelerar el ritmo.
-  await saveState({ running: true, pauseReason: null, consecutiveErrors: 0, nextSendAt: Math.max(state.nextSendAt, Date.now()) });
+  await saveState({
+    eventId,
+    running: true,
+    pauseReason: null,
+    consecutiveErrors: 0,
+    nextSendAt: Math.max(state.nextSendAt, Date.now()),
+  });
   kick();
   return null;
 }
@@ -171,10 +198,10 @@ async function step() {
     return;
   }
 
-  const queued = await queuedCount();
+  const queued = await queuedCount(state.eventId);
   const reason = gateReason({ state, settings, now, localTime: time, sentToday: await sentToday(), queued });
   if (reason) {
-    if (queued === 0) await saveState({ running: false, pauseReason: 'Terminado: no quedan invitados en la cola' });
+    if (queued === 0) await saveState({ running: false, pauseReason: 'Terminado: no quedan invitados en la cola de este evento' });
     return;
   }
 
@@ -194,9 +221,10 @@ async function step() {
   // si el proceso muere aquí, al reiniciar queda incierto en vez de reenviarse.
   const guest = await one<GuestRow>(
     `UPDATE guests SET wa_status = 'sending'
-     WHERE id = (SELECT id FROM guests WHERE wa_status = 'queued' AND phone IS NOT NULL
+     WHERE id = (SELECT id FROM guests WHERE wa_status = 'queued' AND phone IS NOT NULL AND event_id = $1
                  ORDER BY wa_queued_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING *`,
+    [state.eventId],
   );
   if (!guest?.phone) return;
   const event = await getEvent(guest.event_id);

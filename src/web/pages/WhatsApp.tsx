@@ -13,11 +13,25 @@ export function WhatsApp() {
   const toast = useToast();
   const status = useApi<WaStatusResponse>('/wa/status', 5000);
   const [busy, setBusy] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const now = useNow();
+
+  // Evento por defecto: el de la campaña, o el que tenga invitados en cola.
+  useEffect(() => {
+    const d = status.data;
+    if (!d || selectedId !== null) return;
+    const byId = (id: number | null) => d.queuedByEvent.find((e) => e.eventId === id);
+    const pick = byId(d.state.eventId) ?? d.queuedByEvent.find((e) => e.queued > 0) ?? d.queuedByEvent[0];
+    if (pick) setSelectedId(pick.eventId);
+  }, [status.data, selectedId]);
 
   if (status.error) return <Notice tone="bad">{status.error}</Notice>;
   if (!status.data) return <Spinner />;
   const s = status.data;
+  const campaignEvent = s.queuedByEvent.find((e) => e.eventId === s.state.eventId);
+  const selected = s.queuedByEvent.find((e) => e.eventId === selectedId);
+  // Lo que se muestra: el evento que está enviando, o el elegido para empezar.
+  const shownQueued = s.state.running ? s.queued : (selected?.queued ?? 0);
 
   async function run(key: string, fn: () => Promise<void>) {
     setBusy(key);
@@ -32,8 +46,8 @@ export function WhatsApp() {
 
   const start = () =>
     run('start', async () => {
-      status.setData(await api<WaStatusResponse>('/wa/start', { method: 'POST' }));
-      toast('Campaña en marcha');
+      status.setData(await api<WaStatusResponse>('/wa/start', { body: { eventId: selectedId } }));
+      toast(`Campaña en marcha: ${selected?.name ?? ''}`);
     });
   const pause = () =>
     run('pause', async () => {
@@ -58,7 +72,10 @@ export function WhatsApp() {
 
   return (
     <>
-      <PageHeader title="Campaña de WhatsApp" subtitle="Una sola cola para todos los eventos, porque todo sale del mismo número." />
+      <PageHeader
+        title="Campaña de WhatsApp"
+        subtitle="Se envía un evento a la vez. El tope diario es uno solo para todos, porque todo sale del mismo número."
+      />
 
       {config.localUrl ? (
         <div className="mb-6">
@@ -81,6 +98,9 @@ export function WhatsApp() {
                   <span className={cx('size-2.5 rounded-full', s.state.running ? 'animate-pulse bg-brand' : 'bg-ink-mute')} />
                   <h2 className="text-xl font-extrabold">{s.state.running ? 'En marcha' : 'Detenida'}</h2>
                 </div>
+                {s.state.running && campaignEvent ? (
+                  <p className="mt-1 font-semibold text-brand">Enviando: {campaignEvent.name}</p>
+                ) : null}
                 <p className={cx('mt-1', s.state.running ? 'text-white/75' : 'text-ink-mute')}>
                   {sending
                     ? 'Enviando el siguiente mensaje…'
@@ -99,15 +119,32 @@ export function WhatsApp() {
                   icon={<Play className="size-4" />}
                   onClick={() => void start()}
                   loading={busy === 'start'}
-                  disabled={!s.queued || !config.evolutionConfigured || config.localUrl}
+                  disabled={!shownQueued || !config.evolutionConfigured || config.localUrl}
                 >
-                  {s.queued > 0 && s.state.lastSendAt && !s.state.pauseReason?.startsWith('Terminado') ? 'Reanudar' : 'Empezar'}
+                  {selectedId === s.state.eventId && shownQueued > 0 && s.state.lastSendAt && !s.state.pauseReason?.startsWith('Terminado')
+                    ? 'Reanudar'
+                    : 'Empezar'}
                 </Button>
               )}
             </div>
 
+            {!s.state.running ? (
+              <div className="border-t border-line px-5 py-4">
+                <Field label="Evento a enviar" hint="Solo se envía a los invitados en cola de este evento. Encólalos desde el detalle del evento.">
+                  <select className={inputClass} value={selectedId ?? ''} onChange={(e) => setSelectedId(Number(e.target.value))}>
+                    {s.queuedByEvent.length === 0 ? <option value="">No hay eventos</option> : null}
+                    {s.queuedByEvent.map((e) => (
+                      <option key={e.eventId} value={e.eventId}>
+                        {e.name} · {e.date} — {e.queued} en cola
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            ) : null}
+
             <div className="grid grid-cols-2 divide-x divide-line border-t border-line sm:grid-cols-3">
-              <Metric label="En cola" value={s.queued} />
+              <Metric label="En cola" value={shownQueued} />
               <Metric label="Hoy" value={`${s.sentToday} / ${s.settings.dailyCap}`}>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
                   <div className="h-full bg-brand" style={{ width: `${Math.min(100, (s.sentToday / s.settings.dailyCap) * 100)}%` }} />
@@ -116,9 +153,9 @@ export function WhatsApp() {
               <Metric label="Horario" value={`${s.settings.windowStart}–${s.settings.windowEnd}`} hint={s.inWindow ? 'Dentro del horario' : 'Fuera de horario'} />
             </div>
 
-            {s.queued > 0 ? (
+            {shownQueued > 0 ? (
               <p className="border-t border-line px-5 py-3 text-sm text-ink-mute">
-                A este ritmo, la cola actual termina en unos <b className="text-ink">{estimateDays(s)}</b>.
+                A este ritmo, la cola de este evento termina en unos <b className="text-ink">{estimateDays(s, shownQueued)}</b>.
                 {s.state.lastSendAt ? ` Último envío: ${fmtDateTime(new Date(s.state.lastSendAt).toISOString())}.` : ''}
               </p>
             ) : null}
@@ -204,9 +241,9 @@ function Metric({ label, value, hint, children }: { label: string; value: string
 }
 
 /** Días hábiles de envío que faltan, según el tope diario (lo que manda es el tope, no las pausas). */
-function estimateDays(s: WaStatusResponse): string {
+function estimateDays(s: WaStatusResponse, queued: number): string {
   const leftToday = Math.max(0, s.settings.dailyCap - s.sentToday);
-  const rest = Math.max(0, s.queued - leftToday);
+  const rest = Math.max(0, queued - leftToday);
   const days = rest === 0 ? 1 : 1 + Math.ceil(rest / s.settings.dailyCap);
   return days === 1 ? 'hoy o mañana' : `${days} días`;
 }

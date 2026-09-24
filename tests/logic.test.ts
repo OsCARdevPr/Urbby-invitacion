@@ -5,6 +5,7 @@ import { waToHtml } from '../src/server/services/email';
 import { decodeText, parseCsv, readGuestsFile, tidyName, validateRows, type RawRow } from '../src/server/services/excel';
 import { DEFAULT_SETTINGS, INITIAL_STATE, gateReason, inWindow, localParts, nextDelay, validateSettings } from '../src/server/worker/pacing';
 import { mapAck } from '../src/server/services/webhook';
+import { pickCurrentEvent } from '../src/web/lib';
 import { guestsToVcf } from '../src/server/services/vcf';
 
 describe('normalizePhone', () => {
@@ -188,6 +189,26 @@ describe('ritmo de envío', () => {
 
   it('calcula fecha y hora locales de El Salvador (UTC-6)', () => {
     expect(localParts(new Date('2026-10-11T02:30:00Z'), 'America/El_Salvador')).toEqual({ date: '2026-10-10', time: '20:30' });
+  });
+});
+
+describe('evento actual (escáner y pruebas)', () => {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/El_Salvador' }).format(new Date());
+  const shift = (days: number) => {
+    const d = new Date(`${today}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  it('elige el de hoy, si no el próximo, y si ya pasaron todos el más reciente', () => {
+    const past = { id: 1, date: shift(-10) };
+    const todayEv = { id: 2, date: today };
+    const next = { id: 3, date: shift(5) };
+    const later = { id: 4, date: shift(20) };
+    expect(pickCurrentEvent([later, past, todayEv, next])?.id).toBe(2);
+    expect(pickCurrentEvent([later, past, next])?.id).toBe(3);
+    expect(pickCurrentEvent([past, { id: 5, date: shift(-2) }])?.id).toBe(5);
+    expect(pickCurrentEvent([])).toBeUndefined();
   });
 });
 
