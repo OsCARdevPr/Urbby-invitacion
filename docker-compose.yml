@@ -5,6 +5,8 @@
 #   docker compose down              →  apagar (los datos quedan en el volumen "pgdata")
 #
 # La configuración (contraseñas, Evolution, Resend…) se lee del archivo .env.
+# En tu PC, docker compose también carga docker-compose.override.yml, que publica los puertos.
+# Dokploy usa solo este archivo (-f docker-compose.yml).
 
 services:
   db:
@@ -15,10 +17,8 @@ services:
       POSTGRES_USER: urbby
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-urbby}
     volumes:
+      # Los datos viven en este volumen: sobrevive a redeploys y a `docker compose down`.
       - pgdata:/var/lib/postgresql/data
-    # Solo accesible desde esta máquina (para correr la app con `npm run dev` fuera de Docker).
-    ports:
-      - "127.0.0.1:${DB_PORT:-5440}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U urbby -d invitaciones"]
       interval: 5s
@@ -36,8 +36,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${APP_PORT:-3000}:3000"
+    # Sin puertos publicados: en Dokploy el tráfico entra por el dominio (Traefik) y el puerto 3000
+    # del servidor ya lo usa el panel de Dokploy. En tu PC los publica docker-compose.override.yml.
+    expose:
+      - "3000"
 
 volumes:
   pgdata:

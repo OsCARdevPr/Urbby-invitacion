@@ -133,6 +133,14 @@ La cámara del escáner **necesita HTTPS**. Para probarla desde un celular usa l
 
 Los datos quedan en el volumen de Postgres del compose y sobreviven a cada deploy.
 
+**Si los datos se borran al redesplegar:**
+- Revisa que el servicio sea de tipo **Compose**, no **Application**. Una *Application* construye solo el `Dockerfile`, sin
+  Postgres, y todo lo que se guarda dentro del contenedor se pierde en cada deploy.
+- No borres y vuelvas a crear el servicio: el volumen se llama `<nombre-del-servicio>_pgdata`, y un servicio nuevo empieza
+  con un volumen vacío (el viejo sigue en el servidor).
+- No actives *Randomize Compose* ni los volúmenes aislados de *Isolated Deployments*: cambian el nombre del volumen.
+- El compose no publica puertos a propósito: el 3000 del servidor es del panel de Dokploy. El tráfico entra por el dominio.
+
 > Mientras `PUBLIC_BASE_URL` apunte a `localhost` (desarrollo), los envíos masivos de correo y WhatsApp están bloqueados:
 > esas invitaciones no servirían en la puerta. Sí se puede enviar a un invitado puntual desde su ficha, para probar.
 

@@ -1,0 +1,12 @@
+# Solo para tu PC: docker compose lo carga automáticamente junto con docker-compose.yml.
+# Dokploy NO lo usa (despliega con -f docker-compose.yml), así que no choca con sus puertos.
+
+services:
+  db:
+    # Para correr la app con `npm run dev` fuera de Docker. Solo accesible desde esta máquina.
+    ports:
+      - "127.0.0.1:${DB_PORT:-5440}:5432"
+
+  app:
+    ports:
+      - "${APP_PORT:-3000}:3000"
