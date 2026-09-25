@@ -10,6 +10,7 @@ import type { EventRow } from '../../shared/types';
 import { renderCardPng } from '../services/card';
 import { readGuestsFile, validateRows } from '../services/excel';
 import { guestsToVcf } from '../services/vcf';
+import { exportFileName, guestsToXlsx } from '../services/export';
 import { startEmailJob } from '../worker/emailJob';
 import { enqueueEvent } from '../worker/whatsappQueue';
 import { firstError, parseId } from './util';
@@ -151,6 +152,18 @@ export const eventRoutes = new Hono<AppEnv>()
     return c.body(vcf, 200, {
       'Content-Type': 'text/vcard; charset=utf-8',
       'Content-Disposition': `attachment; filename="invitados-${event.id}.vcf"`,
+    });
+  })
+
+  // Lista de invitados con sus datos de contacto y estados, en Excel.
+  .get('/:id/guests.xlsx', admin, async (c) => {
+    const event = await getEvent(parseId(c.req.param('id')));
+    if (!event) return c.json({ error: 'Evento no encontrado' }, 404);
+    const xlsx = await guestsToXlsx(await listGuests(event.id));
+    return c.body(new Uint8Array(xlsx), 200, {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${exportFileName(event.name, event.date)}"`,
+      'Cache-Control': 'no-store',
     });
   })
 
