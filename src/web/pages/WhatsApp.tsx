@@ -99,7 +99,9 @@ export function WhatsApp() {
                   <h2 className="text-xl font-extrabold">{s.state.running ? 'En marcha' : 'Detenida'}</h2>
                 </div>
                 {s.state.running && campaignEvent ? (
-                  <p className="mt-1 font-semibold text-brand">Enviando: {campaignEvent.name}</p>
+                  <p className="mt-1 font-semibold text-brand">
+                    {s.state.broadcastId !== null ? 'Enviando una difusión' : 'Enviando'}: {campaignEvent.name}
+                  </p>
                 ) : null}
                 <p className={cx('mt-1', s.state.running ? 'text-white/75' : 'text-ink-mute')}>
                   {sending
@@ -121,7 +123,11 @@ export function WhatsApp() {
                   loading={busy === 'start'}
                   disabled={!shownQueued || !config.evolutionConfigured || config.localUrl}
                 >
-                  {selectedId === s.state.eventId && shownQueued > 0 && s.state.lastSendAt && !s.state.pauseReason?.startsWith('Terminado')
+                  {selectedId === s.state.eventId &&
+                  s.state.broadcastId === null &&
+                  shownQueued > 0 &&
+                  s.state.lastSendAt &&
+                  !s.state.pauseReason?.startsWith('Terminado')
                     ? 'Reanudar'
                     : 'Empezar'}
                 </Button>

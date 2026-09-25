@@ -81,6 +81,8 @@ export interface WaSettings {
 export interface WaState {
   /** Evento que envía la campaña. Solo se envía a los invitados en cola de este evento. */
   eventId: number | null;
+  /** Si no es null, la campaña está enviando esta difusión (de ese mismo evento) en vez de las invitaciones. */
+  broadcastId: number | null;
   running: boolean;
   pauseReason: string | null;
   nextSendAt: number; // epoch ms
@@ -104,6 +106,51 @@ export interface WaStatusResponse {
   nowLocal: string;
   connection: { state: string; checkedAt: string | null };
   gate: string | null; // por qué no se está enviando ahora mismo, si aplica
+}
+
+// ── Difusiones ───────────────────────────────────────────────────
+
+/** A quiénes del evento va una difusión. Siempre solo a quienes tienen teléfono y no figuran sin WhatsApp. */
+export type BroadcastAudience = 'all' | 'invited' | 'checked_in' | 'not_checked_in';
+
+export type BroadcastStatus =
+  | 'queued'
+  | 'sending'
+  | 'sent'
+  | 'delivered'
+  | 'read'
+  | 'no_whatsapp'
+  | 'failed'
+  | 'uncertain' // el proceso se reinició a mitad del envío: no se reintenta solo
+  | 'cancelled';
+
+export interface BroadcastSummary {
+  id: number;
+  event_id: number;
+  event_name: string;
+  audience: BroadcastAudience;
+  message: string;
+  created_at: string;
+  total: number;
+  queued: number;
+  /** Enviados, entregados o leídos. */
+  sent: number;
+  /** Entregados o leídos. */
+  delivered: number;
+  read: number;
+  /** Fallidos, sin WhatsApp o inciertos. */
+  problems: number;
+  cancelled: number;
+}
+
+export interface BroadcastRecipient {
+  guest_id: number;
+  name: string;
+  business: string;
+  phone: string | null;
+  status: BroadcastStatus;
+  error: string | null;
+  sent_at: string | null;
 }
 
 export type ImportRowStatus = 'ok' | 'warning' | 'error' | 'duplicate';

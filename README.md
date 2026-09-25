@@ -38,6 +38,21 @@ Todo corre en **Docker**: un contenedor con la base de datos y otro con la app (
 
 ---
 
+## Difusiones
+
+En *Difusiones* se manda un **mensaje de texto por WhatsApp** a los invitados de un evento: un recordatorio, un cambio de
+hora, un agradecimiento. Se elige el evento, a quiénes (recibieron la invitación, no han ingresado, ya ingresaron o todos con
+teléfono) y el texto, que puede llevar `{nombre}`, `{hora}`, `{lugar}` y los demás datos, como la invitación.
+
+- Los destinatarios se fijan al crearla. Quien figura "Sin WhatsApp" o no tiene teléfono no entra.
+- Sale por el **mismo número y al mismo ritmo** que las invitaciones, y **comparte el tope diario**. La campaña envía una cosa a
+  la vez: las invitaciones de un evento o una difusión.
+- Cada destinatario tiene su estado (en cola, enviado, entregado, leído, falló). Se pueden reintentar los fallidos y cancelar
+  los pendientes. Una difusión solo se puede eliminar si todavía no salió ningún mensaje.
+- Lo más seguro es escribirle a quienes **ya recibieron la invitación**: ya tienen un mensaje de este número.
+
+---
+
 ## WhatsApp sin que bloqueen el número
 
 Ningún ajuste garantiza que WhatsApp no bloquee un número usado con Evolution API (no es la API oficial). Lo que más pesa es

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
-import { CalendarDays, LogOut, MessageCircle, PlugZap, ScanLine } from 'lucide-react';
+import { CalendarDays, LogOut, Megaphone, MessageCircle, PlugZap, ScanLine } from 'lucide-react';
 import { useSession } from '../session';
 import { cx } from './ui';
 
@@ -8,6 +8,7 @@ import { cx } from './ui';
 const NAV = [
   { to: '/', label: 'Eventos', icon: CalendarDays, match: (p: string) => p === '/' || p.startsWith('/events') },
   { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, match: (p: string) => p.startsWith('/whatsapp') },
+  { to: '/difusiones', label: 'Difusiones', icon: Megaphone, match: (p: string) => p.startsWith('/difusiones') },
   { to: '/conexiones', label: 'Conexiones', icon: PlugZap, match: (p: string) => p.startsWith('/conexiones') },
   { to: '/scan', label: 'Escáner', icon: ScanLine, match: (p: string) => p.startsWith('/scan') },
 ];
@@ -53,7 +54,7 @@ export function Layout() {
 
       {/* Pestañas inferiores en el celular */}
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] sm:hidden">
-        <div className="grid grid-cols-4">
+        <div className="grid grid-cols-5">
           {NAV.map((n) => {
             const active = n.match(pathname);
             return (
