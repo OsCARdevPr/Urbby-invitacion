@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { ArrowLeft, Check, Contact, FileSpreadsheet, Mail, MessageCircle, Pencil, Search, UserPlus } from 'lucide-react';
+import { ArrowLeft, Check, Contact, FileDown, FileSpreadsheet, Mail, MessageCircle, Pencil, Search, UserPlus } from 'lucide-react';
 import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { Badge, Button, Card, cx, inputClass, Notice, Spinner, Stat, useToast } from '../components/ui';
@@ -201,11 +201,21 @@ export function EventDetail() {
 
       {/* Invitados */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-xl font-bold">Invitados</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="mr-auto text-xl font-bold sm:mr-1">Invitados</h2>
           <Button icon={<UserPlus className="size-4" />} onClick={() => setAddOpen(true)}>
             Agregar invitado
           </Button>
+          <a
+            href={`/api/events/${id}/guests.xlsx`}
+            title="Excel con nombre, negocio, teléfono, correo y en qué va cada envío"
+            className={cx(
+              'inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-surface px-4 font-semibold hover:bg-surface-2',
+              all.length === 0 && 'pointer-events-none opacity-50',
+            )}
+          >
+            <FileDown className="size-4" /> Exportar lista
+          </a>
         </div>
         <div className="relative sm:ml-auto sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-mute" />
