@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { ArrowLeft, Check, Contact, FileSpreadsheet, Mail, MessageCircle, Pencil, Search } from 'lucide-react';
+import { ArrowLeft, Check, Contact, FileSpreadsheet, Mail, MessageCircle, Pencil, Search, UserPlus } from 'lucide-react';
 import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { Badge, Button, Card, cx, inputClass, Notice, Spinner, Stat, useToast } from '../components/ui';
 import { ImportModal } from '../components/ImportModal';
+import { AddGuestModal } from '../components/AddGuestModal';
 import { GuestModal } from '../components/GuestModal';
 import { EMAIL_LABEL, fmtTime, fold, formatPhone, WA_LABEL, type Tone } from '../lib';
 import { useSession } from '../session';
@@ -41,6 +42,7 @@ export function EventDetail() {
   const guests = useApi<GuestRow[]>(`/events/${id}/guests`, 8000);
   const [startedJobId, setStartedJobId] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<GuestRow | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -199,7 +201,12 @@ export function EventDetail() {
 
       {/* Invitados */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <h2 className="text-xl font-bold">Invitados</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold">Invitados</h2>
+          <Button icon={<UserPlus className="size-4" />} onClick={() => setAddOpen(true)}>
+            Agregar invitado
+          </Button>
+        </div>
         <div className="relative sm:ml-auto sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-mute" />
           <input className={`${inputClass} pl-9`} placeholder="Buscar nombre, negocio, teléfono…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -215,7 +222,7 @@ export function EventDetail() {
 
       {guests.loading ? <Spinner /> : null}
       {guests.data && all.length === 0 ? (
-        <Card className="p-8 text-center text-ink-mute">Aún no hay invitados. Empieza importando el Excel.</Card>
+        <Card className="p-8 text-center text-ink-mute">Aún no hay invitados. Importa el Excel o agrégalos uno por uno.</Card>
       ) : null}
       {all.length > 0 && list.length === 0 ? <Card className="p-6 text-center text-ink-mute">Nadie coincide con el filtro.</Card> : null}
 
@@ -297,6 +304,17 @@ export function EventDetail() {
         onImported={(n) => {
           setImportOpen(false);
           toast(`${n} invitados importados`);
+          void refresh();
+        }}
+      />
+      <AddGuestModal
+        open={addOpen}
+        eventId={Number(id)}
+        onClose={() => setAddOpen(false)}
+        onAdded={(guest) => {
+          setAddOpen(false);
+          setSelected(guest);
+          toast('Invitado agregado: su invitación está lista para compartir');
           void refresh();
         }}
       />

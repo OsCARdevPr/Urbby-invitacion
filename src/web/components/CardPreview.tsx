@@ -65,7 +65,7 @@ export function WhatsAppPreview({ event, guestName, guestBusiness }: { event: Pr
 }
 
 /** Formato de WhatsApp: *negrita*, _cursiva_, ~tachado~. */
-function waFormat(text: string): ReactNode[] {
+export function waFormat(text: string): ReactNode[] {
   return text.split(/(\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~)/g).map((part, i) => {
     if (/^\*[^*]+\*$/.test(part)) return <b key={i}>{part.slice(1, -1)}</b>;
     if (/^_[^_]+_$/.test(part)) return <i key={i}>{part.slice(1, -1)}</i>;
