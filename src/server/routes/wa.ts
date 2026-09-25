@@ -33,8 +33,10 @@ export const waRoutes = new Hono<AppEnv>()
   .get('/status', async (c) => c.json(await waStatus()))
 
   .post('/start', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { eventId?: unknown };
-    const error = await startCampaign(Number(body.eventId));
+    const body = (await c.req.json().catch(() => ({}))) as { eventId?: unknown; broadcastId?: unknown };
+    const error = await startCampaign(
+      body.broadcastId !== undefined ? { broadcastId: Number(body.broadcastId) } : { eventId: Number(body.eventId) },
+    );
     return error ? c.json({ error }, 400) : c.json(await waStatus());
   })
 

@@ -143,6 +143,17 @@ export async function sendImage(opts: {
   return { messageId: data?.key?.id ?? null };
 }
 
+/** Envía un mensaje de texto (difusiones). Igual que con la tarjeta, muestra "escribiendo…" durante `delayMs`. */
+export async function sendText(opts: { number: string; text: string; delayMs: number }): Promise<{ messageId: string | null }> {
+  const data = await call<{ key?: { id?: string } }>(
+    'POST',
+    `/message/sendText/${inst()}`,
+    { number: opts.number, text: opts.text, delay: opts.delayMs, linkPreview: false },
+    opts.delayMs + 90_000,
+  );
+  return { messageId: data?.key?.id ?? null };
+}
+
 // Solo estados de entrega y conexión: los mensajes entrantes no se escuchan.
 export const WEBHOOK_EVENTS = ['MESSAGES_UPDATE', 'CONNECTION_UPDATE'];
 
