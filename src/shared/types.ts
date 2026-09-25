@@ -27,8 +27,28 @@ export interface EventRow {
   maps_url: string; // enlace de Google Maps, opcional
   wa_template: string; // texto de la invitación: pie del WhatsApp y cuerpo del correo
   email_subject: string;
+  telnyx_template: TelnyxTemplate | null; // plantilla de WhatsApp creada en Telnyx para este evento
   created_at: string;
 }
+
+/** Canal por el que sale el WhatsApp: Evolution (número secundario) o Telnyx (API oficial, con plantilla aprobada). */
+export type WaProvider = 'evolution' | 'telnyx';
+
+/**
+ * Plantilla de WhatsApp creada en Telnyx a partir del texto del evento. Meta la aprueba una vez; después
+ * cada envío solo lleva la tarjeta del invitado (cabecera) y los valores de las variables del texto.
+ */
+export interface TelnyxTemplate {
+  id: string; // identificador de la plantilla en Telnyx
+  name: string; // nombre en WhatsApp: minúsculas, números y guiones bajos
+  language: string;
+  text: string; // texto del evento con el que se creó, para avisar si después cambió
+  /** Variable del texto ("1", "2"…) → placeholder que la llena ('nombre', 'lugar'…). */
+  variables: Record<string, string>;
+  createdAt: string;
+}
+
+export type TelnyxApproval = 'pending' | 'approved' | 'rejected' | 'paused' | 'disabled' | 'unknown';
 
 export interface GuestRow {
   id: number;
@@ -42,6 +62,7 @@ export interface GuestRow {
   email_sent_at: string | null;
   email_error: string | null;
   wa_status: WaStatus;
+  wa_provider: WaProvider | 'manual' | null; // por dónde salió el WhatsApp; 'manual' = lo mandó el admin a mano
   wa_queued_at: string | null;
   wa_message_id: string | null;
   wa_sent_at: string | null;
@@ -81,6 +102,8 @@ export interface WaSettings {
 export interface WaState {
   /** Evento que envía la campaña. Solo se envía a los invitados en cola de este evento. */
   eventId: number | null;
+  /** Canal de la campaña. Con Telnyx no hacen falta las pausas largas: es la API oficial. */
+  provider: WaProvider;
   running: boolean;
   pauseReason: string | null;
   nextSendAt: number; // epoch ms
@@ -99,7 +122,10 @@ export interface WaStatusResponse {
   queued: number;
   /** En cola de cada evento, para elegir cuál enviar. */
   queuedByEvent: { eventId: number; name: string; date: string; queued: number }[];
+  /** Enviados hoy por el canal de la campaña. */
   sentToday: number;
+  /** Enviados hoy y tope de cada canal: cada uno sale de su propio número. */
+  today: Record<WaProvider, { sent: number; cap: number }>;
   inWindow: boolean;
   nowLocal: string;
   connection: { state: string; checkedAt: string | null };

@@ -12,6 +12,8 @@ import { EvolutionError, findWebhook, instanceInfo, sendImage, serverInfo, verif
 import { formatPhone, normalizePhone } from '../services/phone';
 import { clean, isEmail } from '../services/text';
 import { webhookUrl } from './wa';
+import { accountBalance, listApprovedTemplates, publicKeyValid } from '../services/telnyx';
+import { cardsReachable } from './telnyx';
 
 // Prueba de conexiones: revisa Evolution y Resend paso por paso, y envía una invitación de prueba
 // con los datos que escriba el admin. Nada de esto toca la base de datos ni la cola de la campaña.
@@ -163,6 +165,72 @@ export const diagnosticsRoutes = new Hono<AppEnv>()
       linkedNumber: linkedNumber ? formatPhone(linkedNumber) : null,
       senderPhoneMismatch: Boolean(linkedNumber && display !== linkedNumber),
     });
+  })
+
+  .get('/telnyx', async (c) => {
+    const t = config.telnyx;
+    const missing = [!t.apiKey && 'TELNYX_API_KEY', !t.from && 'TELNYX_WHATSAPP_FROM'].filter(Boolean);
+    const steps: Step[] = [
+      {
+        key: 'config',
+        label: 'Variables de entorno',
+        ok: missing.length === 0,
+        detail: missing.length ? `Falta ${missing.join(', ')} en el .env` : `Envía desde el ${t.from}`,
+      },
+    ];
+
+    // 1. API key (y saldo: cada mensaje de marketing tiene costo)
+    let keyOk = false;
+    if (!t.apiKey) {
+      steps.push({ key: 'apikey', label: 'API key', ok: null, detail: 'Falta TELNYX_API_KEY' });
+    } else {
+      const r = await timed(async () => {
+        const { balance, currency } = await accountBalance();
+        return `Aceptada · saldo ${balance} ${currency}`.trim();
+      });
+      keyOk = r.ok;
+      steps.push({ key: 'apikey', label: 'API key', ...r });
+    }
+
+    // 2. Cuenta de WhatsApp Business: hace falta para crear las plantillas
+    if (!keyOk) {
+      steps.push({ key: 'waba', label: 'Cuenta de WhatsApp Business', ok: null, detail: 'Primero tiene que aceptarse la API key' });
+    } else if (!t.wabaId) {
+      steps.push({ key: 'waba', label: 'Cuenta de WhatsApp Business', ok: false, detail: 'Falta TELNYX_WABA_ID: sin ella no se pueden crear las plantillas' });
+    } else {
+      const r = await timed(async () => {
+        const n = await listApprovedTemplates();
+        return `Accesible · ${n} plantilla${n === 1 ? '' : 's'} aprobada${n === 1 ? '' : 's'}`;
+      });
+      steps.push({ key: 'waba', label: 'Cuenta de WhatsApp Business', ...r });
+    }
+
+    // 3. Tarjetas: Telnyx descarga la de cada invitado de PUBLIC_BASE_URL
+    const reachable = cardsReachable();
+    steps.push({
+      key: 'cards',
+      label: 'Tarjetas públicas',
+      ok: reachable,
+      detail: reachable
+        ? `Telnyx descarga cada tarjeta de ${config.publicBaseUrl}/i/…`
+        : 'PUBLIC_BASE_URL debe ser la URL pública con https: Telnyx descarga de ahí la tarjeta de cada invitado',
+    });
+
+    // 4. Avisos de entrega: solo aviso, el envío funciona sin ellos
+    steps.push({
+      key: 'webhook',
+      label: 'Estados de entrega',
+      ok: !t.publicKey ? null : publicKeyValid(),
+      detail: !t.publicKey
+        ? 'Sin TELNYX_PUBLIC_KEY no se reciben los estados de entrega y lectura (el envío funciona igual)'
+        : publicKeyValid()
+          ? reachable
+            ? 'Cada mensaje pide sus avisos a esta app, con la firma verificada'
+            : 'La llave es válida, pero los avisos solo llegan con PUBLIC_BASE_URL pública con https'
+          : 'TELNYX_PUBLIC_KEY no tiene el formato esperado (base64 de 32 bytes, del portal → Keys & Credentials → Public Key)',
+    });
+
+    return c.json({ steps, ready: steps.every((s) => s.ok !== false) });
   })
 
   .get('/email', async (c) => {

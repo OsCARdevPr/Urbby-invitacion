@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { CheckCircle2, CircleDashed, Mail, MessageCircle, RefreshCw, Send, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Mail, MessageCircle, RefreshCw, Send, ShieldCheck, XCircle } from 'lucide-react';
 import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { WhatsAppPreview } from '../components/CardPreview';
@@ -30,14 +30,32 @@ type ChannelResult = { ok: boolean; detail: string };
 export function Connections() {
   const { config } = useSession();
   const evolution = useApi<EvolutionDiag>('/diagnostics/evolution');
+  const telnyx = useApi<EmailDiag>(config.telnyxConfigured ? '/diagnostics/telnyx' : null);
   const email = useApi<EmailDiag>('/diagnostics/email');
 
   return (
     <>
       <PageHeader
         title="Conexiones"
-        subtitle="Comprueba que la app puede enviar por WhatsApp (Evolution API) y por correo (Resend), y mándate una invitación de prueba."
+        subtitle="Comprueba que la app puede enviar por WhatsApp (Telnyx o Evolution API) y por correo (Resend), y mándate una invitación de prueba."
       />
+
+      {config.telnyxConfigured ? (
+        <div className="mb-6">
+          <Diagnostic
+            title="WhatsApp · Telnyx (API oficial)"
+            icon={<ShieldCheck className="size-5" />}
+            data={telnyx.data}
+            error={telnyx.error}
+            onRetry={telnyx.reload}
+          >
+            <Notice tone="info">
+              Para probar un envío real por Telnyx, agrégate como invitado en un evento con plantilla aprobada y usa “Enviar ya por Telnyx” en
+              tu ficha. La prueba de abajo usa Evolution.
+            </Notice>
+          </Diagnostic>
+        </div>
+      ) : null}
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <Diagnostic
@@ -250,7 +268,7 @@ function TestSend({ whatsappReady, emailReady }: { whatsappReady: boolean; email
           <fieldset className="grid gap-2">
             <legend className="mb-1.5 text-sm font-bold text-ink-soft">Enviar por</legend>
             <Channel
-              label="WhatsApp"
+              label="WhatsApp (Evolution)"
               checked={useWhatsapp}
               disabled={!whatsappReady}
               why="WhatsApp no está listo: revisa la conexión de arriba"

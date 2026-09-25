@@ -22,18 +22,29 @@ export function mapAck(status: unknown): 'sent' | 'delivered' | 'read' | null {
   return null;
 }
 
+/**
+ * Avanza el estado del mensaje con este id (enviado → entregado → leído). Un aviso atrasado no hace retroceder
+ * el estado. Devuelve false si ningún invitado tiene ese mensaje. Lo usan Evolution y Telnyx.
+ */
+export async function advanceByMessageId(messageId: string, status: 'sent' | 'delivered' | 'read'): Promise<boolean> {
+  const guest = await one<Pick<GuestRow, 'id' | 'wa_status'>>(`SELECT id, wa_status FROM guests WHERE wa_message_id = $1`, [messageId]);
+  if (!guest) return false;
+  const current = RANK[guest.wa_status];
+  if (current !== undefined && RANK[status]! > current) await exec(`UPDATE guests SET wa_status = $1 WHERE id = $2`, [status, guest.id]);
+  return true;
+}
+
+/** El proveedor avisó que el mensaje no se entregó. Solo aplica si seguía como "enviado": no pisa un entregado o leído. */
+export const failByMessageId = (messageId: string, status: 'failed' | 'no_whatsapp', error: string) =>
+  exec(`UPDATE guests SET wa_status = $1, wa_error = $2 WHERE wa_message_id = $3 AND wa_status = 'sent'`, [status, error, messageId]);
+
 export async function handleMessagesUpdate(data: unknown) {
   for (const d of asArray(data)) {
     const status = mapAck(d.status ?? d.update?.status);
     if (!status) continue;
     const ids = [d.keyId, d.key?.id, d.messageId].filter((v): v is string => typeof v === 'string');
     for (const id of ids) {
-      const guest = await one<Pick<GuestRow, 'id' | 'wa_status'>>(`SELECT id, wa_status FROM guests WHERE wa_message_id = $1`, [id]);
-      if (!guest) continue;
-      // Solo avanza (enviado → entregado → leído); un ack atrasado no hace retroceder el estado.
-      const current = RANK[guest.wa_status];
-      if (current !== undefined && RANK[status]! > current) await exec(`UPDATE guests SET wa_status = $1 WHERE id = $2`, [status, guest.id]);
-      break;
+      if (await advanceByMessageId(id, status)) break;
     }
   }
 }

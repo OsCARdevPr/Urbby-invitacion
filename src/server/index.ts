@@ -4,7 +4,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
-import { assertConfig, config, evolutionConfigured, publicUrlIsLocal, resendConfigured } from './config';
+import { assertConfig, config, evolutionConfigured, publicUrlIsLocal, resendConfigured, telnyxConfigured } from './config';
 import { initDb, pool } from './db';
 import { authRoutes, requireRole, type AppEnv } from './auth';
 import { eventRoutes } from './routes/events';
@@ -13,6 +13,7 @@ import { checkinRoutes } from './routes/checkin';
 import { waRoutes, webhookUrl } from './routes/wa';
 import { publicRoutes } from './routes/public';
 import { diagnosticsRoutes } from './routes/diagnostics';
+import { handleTelnyxWebhook, telnyxRoutes } from './routes/telnyx';
 import { handleEvolutionEvent } from './services/webhook';
 import { DEFAULT_EMAIL_SUBJECT, DEFAULT_EVENT, DEFAULT_WA_TEMPLATE, PLACEHOLDERS } from '../shared/template';
 import { emailJobStatus, recoverEmails } from './worker/emailJob';
@@ -40,6 +41,9 @@ api.post('/webhooks/evolution/:secret', async (c) => {
   return c.json({ ok: true });
 });
 
+// Avisos de entrega de Telnyx: sin sesión, pero con la firma Ed25519 verificada contra TELNYX_PUBLIC_KEY.
+api.post('/webhooks/telnyx', handleTelnyxWebhook);
+
 // Desde aquí, cualquier sesión (admin o portero). Cada grupo restringe más si hace falta.
 api.use('*', requireRole('admin', 'doorman'));
 api.get('/config', (c) => {
@@ -48,6 +52,7 @@ api.get('/config', (c) => {
     role: c.get('role'),
     name: c.get('staffName'),
     evolutionConfigured: evolutionConfigured(),
+    telnyxConfigured: telnyxConfigured(),
     resendConfigured: resendConfigured(),
     publicBaseUrl: config.publicBaseUrl,
     localUrl: publicUrlIsLocal(),
@@ -62,6 +67,7 @@ api.route('/events', eventRoutes);
 api.route('/guests', guestRoutes);
 api.route('/wa', waRoutes);
 api.route('/diagnostics', diagnosticsRoutes);
+api.route('/telnyx', telnyxRoutes);
 api.get('/email/job', requireRole('admin'), (c) => c.json(emailJobStatus()));
 api.all('*', (c) => c.json({ error: 'Ruta no encontrada' }, 404));
 
@@ -103,7 +109,7 @@ await startWorker();
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`Invitaciones Urbby escuchando en http://localhost:${info.port}`);
   console.log(
-    `  Evolution: ${evolutionConfigured() ? 'configurada' : 'NO configurada'} · Resend: ${resendConfigured() ? 'configurado' : 'NO configurado'}`,
+    `  Telnyx: ${telnyxConfigured() ? 'configurado' : 'NO configurado'} · Evolution: ${evolutionConfigured() ? 'configurada' : 'NO configurada'} · Resend: ${resendConfigured() ? 'configurado' : 'NO configurado'}`,
   );
 });
 

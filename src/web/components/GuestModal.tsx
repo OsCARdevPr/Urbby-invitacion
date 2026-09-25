@@ -4,6 +4,7 @@ import { api } from '../api';
 import { Badge, Button, Field, inputClass, Modal, Notice, useToast } from './ui';
 import { InvitationMessage } from './InvitationMessage';
 import { EMAIL_LABEL, fmtDateTime, formatPhone, WA_LABEL } from '../lib';
+import { useSession } from '../session';
 import type { EventRow, GuestRow } from '../../shared/types';
 
 /** Ficha del invitado: tarjeta, estados, acciones y edición. */
@@ -19,6 +20,7 @@ export function GuestModal({
   onChanged: () => Promise<void>;
 }) {
   const toast = useToast();
+  const { config } = useSession();
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
@@ -133,7 +135,12 @@ export function GuestModal({
                 <h3 className="font-bold">WhatsApp</h3>
                 <Badge tone={waTone}>{waLabel}</Badge>
               </div>
-              {g.wa_sent_at ? <p className="mt-1 text-sm text-ink-mute">Enviado {fmtDateTime(g.wa_sent_at)}</p> : null}
+              {g.wa_sent_at ? (
+                <p className="mt-1 text-sm text-ink-mute">
+                  Enviado {fmtDateTime(g.wa_sent_at)}
+                  {g.wa_provider ? ` · ${PROVIDER_LABEL[g.wa_provider]}` : ''}
+                </p>
+              ) : null}
               {g.wa_error ? <p className="mt-1 text-sm text-bad">{g.wa_error}</p> : null}
               {g.wa_status === 'uncertain' ? (
                 <div className="mt-2">
@@ -162,6 +169,18 @@ export function GuestModal({
                 {g.wa_status === 'uncertain' || g.wa_status === 'failed' ? (
                   <Button loading={busy === 'mark'} onClick={() => void act('mark', '/wa/mark-sent', undefined, 'Marcado como enviado')}>
                     Sí le llegó
+                  </Button>
+                ) : null}
+                {config.telnyxConfigured && g.phone && g.wa_status !== 'sending' ? (
+                  <Button
+                    loading={busy === 'telnyx'}
+                    onClick={() => {
+                      const again = alreadySent || g.wa_status === 'queued';
+                      if (again && !window.confirm(alreadySent ? 'Ya se le envió. ¿Enviarlo otra vez por Telnyx?' : 'Está en la cola. ¿Enviarlo ya por Telnyx?')) return;
+                      void act('telnyx', '/wa/telnyx-send', undefined, 'Enviado por Telnyx');
+                    }}
+                  >
+                    Enviar ya por Telnyx
                   </Button>
                 ) : null}
               </div>
@@ -279,3 +298,9 @@ export function GuestForm({
     </form>
   );
 }
+
+const PROVIDER_LABEL: Record<NonNullable<GuestRow['wa_provider']>, string> = {
+  telnyx: 'por Telnyx',
+  evolution: 'por Evolution',
+  manual: 'a mano',
+};

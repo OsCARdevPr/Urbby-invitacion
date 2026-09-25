@@ -88,6 +88,11 @@ const migrations: string[] = [
     value jsonb NOT NULL
   );
   `,
+  // WhatsApp por Telnyx (API oficial): la plantilla aprobada de cada evento y por dónde salió cada envío.
+  `
+  ALTER TABLE events ADD COLUMN telnyx_template jsonb;
+  ALTER TABLE guests ADD COLUMN wa_provider text;
+  `,
 ];
 
 /** Crea o actualiza las tablas. Un candado evita que dos procesos migren a la vez. */

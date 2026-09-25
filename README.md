@@ -38,7 +38,39 @@ Todo corre en **Docker**: un contenedor con la base de datos y otro con la app (
 
 ---
 
-## WhatsApp sin que bloqueen el número
+## WhatsApp por Telnyx (API oficial, recomendado)
+
+Con Telnyx el WhatsApp sale por la **API oficial de Meta**, con una **plantilla de marketing aprobada**. Así el número no se
+bloquea por enviar en automático, y no hacen falta las pausas largas de Evolution: sale un mensaje cada ~10 s, dentro del
+horario. Evolution sigue disponible; el canal se elige al empezar cada campaña.
+
+**Lo que necesitas antes:**
+- Una cuenta de Telnyx con saldo y una **cuenta de WhatsApp Business** conectada (portal de Telnyx → Messaging → WhatsApp →
+  Embedded Signup, con acceso de administrador al Business Manager de Meta).
+- Un número que **no esté activo en la app de WhatsApp** normal. Un número de WhatsApp Business app se puede conectar con
+  *Coexistence*.
+- Que los invitados hayan **aceptado recibir mensajes** (Meta lo exige para marketing).
+- Costo aproximado para El Salvador: **~$0.074 de Meta por mensaje de marketing entregado**, más la tarifa de Telnyx. Para 200
+  invitados, unos $15. Revisa la tarifa vigente en telnyx.com/pricing/whatsapp.
+
+**Configuración** (variables en el `.env`, ver `.env.example`): `TELNYX_API_KEY`, `TELNYX_WHATSAPP_FROM`, `TELNYX_WABA_ID` y
+`TELNYX_PUBLIC_KEY`. Pon también `SENDER_PHONE_DISPLAY` con el número de Telnyx, que es el que el correo pide guardar. Luego
+revisa *Conexiones* → *WhatsApp · Telnyx*.
+
+**Flujo:**
+1. En el detalle del evento, **Plantilla de WhatsApp · Telnyx** → *Crear plantilla y enviarla a revisión*. Se crea con el
+   texto de la invitación (`{nombre}`, `{lugar}`… pasan a ser variables) y la tarjeta como imagen. Meta responde en 24 a 48 h.
+2. Cuando diga **Aprobada**, encola a los invitados y en *WhatsApp* elige **Telnyx · API oficial** y *Empezar*. Cada invitado
+   recibe su propia tarjeta con su QR.
+3. Para probar antes, agrégate como invitado y usa **Enviar ya por Telnyx** en tu ficha.
+
+Si cambias el texto de la invitación después de crear la plantilla, por Telnyx se sigue enviando el texto aprobado: crea una
+plantilla nueva. Telnyx descarga cada tarjeta de `PUBLIC_BASE_URL`, así que solo funciona con la URL pública con https (no en
+`localhost`).
+
+---
+
+## WhatsApp por Evolution sin que bloqueen el número
 
 Ningún ajuste garantiza que WhatsApp no bloquee un número usado con Evolution API (no es la API oficial). Lo que más pesa es
 que la gente **no reporte ni bloquee** el mensaje. La app hace lo que está a su alcance:
@@ -168,9 +200,9 @@ src/server/
   index.ts              servidor Hono: API, webhook, página pública /i/:token, panel
   db.ts                 Postgres + migraciones
   auth.ts               login admin / portero (cookie firmada)
-  routes/               events, guests, checkin, wa, public
-  services/             card (tarjeta), excel, phone, email, evolution, webhook, vcf, qr
-  worker/               cola de WhatsApp (whatsappQueue + pacing) y envío de correos
+  routes/               events, guests, checkin, wa, telnyx, public
+  services/             card (tarjeta), excel, phone, email, evolution, telnyx, webhook, vcf, qr
+  worker/               cola de WhatsApp (whatsappQueue + pacing; Telnyx o Evolution) y envío de correos
 src/web/                panel React: eventos, detalle, campaña de WhatsApp, escáner
 tests/                  pruebas de la lógica pura
 ```

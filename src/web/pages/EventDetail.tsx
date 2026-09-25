@@ -7,6 +7,7 @@ import { Badge, Button, Card, cx, inputClass, Notice, Spinner, Stat, useToast } 
 import { ImportModal } from '../components/ImportModal';
 import { AddGuestModal } from '../components/AddGuestModal';
 import { GuestModal } from '../components/GuestModal';
+import { TelnyxTemplatePanel } from '../components/TelnyxTemplatePanel';
 import { EMAIL_LABEL, fmtTime, fold, formatPhone, WA_LABEL, type Tone } from '../lib';
 import { useSession } from '../session';
 import type { EventRow, EventStats, GuestRow } from '../../shared/types';
@@ -180,7 +181,11 @@ export function EventDetail() {
           n={4}
           title="Enviar por WhatsApp"
           done={stats.total > 0 && waPending === 0}
-          detail="Encola a los invitados y la campaña los envía poco a poco: unos 20 al día, con pausas al azar."
+          detail={
+            config.telnyxConfigured
+              ? 'Encola a los invitados y elige el canal en la campaña: Telnyx (API oficial, con la plantilla aprobada) o Evolution (número secundario, poco a poco).'
+              : 'Encola a los invitados y la campaña los envía poco a poco: unos 20 al día, con pausas al azar.'
+          }
         >
           <div className="flex flex-wrap gap-2">
             <Button
@@ -198,6 +203,8 @@ export function EventDetail() {
           </div>
         </Step>
       </Card>
+
+      {config.telnyxConfigured ? <TelnyxTemplatePanel eventId={Number(id)} /> : null}
 
       {/* Invitados */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">

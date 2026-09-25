@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: WaSettings = {
 
 export const INITIAL_STATE: WaState = {
   eventId: null,
+  provider: 'evolution',
   running: false,
   pauseReason: null,
   nextSendAt: 0,

@@ -1,9 +1,12 @@
-import { config, evolutionConfigured, LOCAL_URL_BLOCK, publicUrlIsLocal } from '../config';
+import { config, evolutionConfigured, LOCAL_URL_BLOCK, publicUrlIsLocal, telnyxConfigured } from '../config';
 import { exec, getEvent, kvGet, kvSet, nowIso, one, query } from '../db';
-import type { GuestRow, WaSettings, WaState, WaStatusResponse } from '../../shared/types';
+import type { EventRow, GuestRow, WaProvider, WaSettings, WaState, WaStatusResponse } from '../../shared/types';
 import { getCardPng } from '../services/card';
 import { connectionState, EvolutionError, sendImage } from '../services/evolution';
+import { guestUrl } from '../services/qr';
+import { sendTemplate, telnyxWebhookUrl, templateApproval } from '../services/telnyx';
 import { renderTemplate, templateVars } from '../../shared/template';
+import { APPROVAL_LABEL, templateValues } from '../../shared/telnyxTemplate';
 import {
   DEFAULT_SETTINGS,
   gateReason,
@@ -56,57 +59,100 @@ const queuedByEvent = () =>
      GROUP BY e.id ORDER BY e.date, e.id`,
   );
 
-/** Mensajes enviados hoy (hora de El Salvador) desde este número, sumando todos los eventos. */
-const sentToday = async () =>
+/**
+ * Mensajes enviados hoy (hora de El Salvador) por un canal, sumando todos los eventos. Cada canal sale de su
+ * propio número y tiene su propio tope. Los enviados a mano cuentan para Evolution, por si salieron de ese número.
+ */
+const sentToday = async (provider: WaProvider) =>
   (await one<{ n: number }>(
     `SELECT count(*) AS n FROM guests
-     WHERE (wa_sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date`,
-    [config.tz],
+     WHERE (wa_sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date
+       AND (COALESCE(wa_provider, 'evolution') = 'telnyx') = $2`,
+    [config.tz, provider === 'telnyx'],
   ))!.n;
+
+/** Tope diario del canal: el de los ajustes para Evolution; el de TELNYX_DAILY_CAP para Telnyx. */
+const dailyCap = (provider: WaProvider, settings: WaSettings) => (provider === 'telnyx' ? config.telnyx.dailyCap : settings.dailyCap);
+
+/** Con Telnyx (API oficial) no hacen falta las pausas largas ni el "escribiendo…": unos segundos entre mensajes. */
+const TELNYX_DELAY_SEC: [number, number] = [3, 8];
 
 export async function waStatus(): Promise<WaStatusResponse> {
   const state = await getState();
-  const [settings, queued, byEvent, sent, connection] = await Promise.all([
+  const [settings, queued, byEvent, sentEvolution, sentTelnyx, connection] = await Promise.all([
     getSettings(),
     queuedCount(state.eventId),
     queuedByEvent(),
-    sentToday(),
+    sentToday('evolution'),
+    sentToday('telnyx'),
     getConnection(),
   ]);
   const now = Date.now();
   const { date, time } = localParts(new Date(now), config.tz);
+  const sent = state.provider === 'telnyx' ? sentTelnyx : sentEvolution;
   return {
     state,
     settings,
     queued,
     queuedByEvent: byEvent,
     sentToday: sent,
+    today: {
+      evolution: { sent: sentEvolution, cap: settings.dailyCap },
+      telnyx: { sent: sentTelnyx, cap: config.telnyx.dailyCap },
+    },
     inWindow: inWindow(time, settings.windowStart, settings.windowEnd),
     nowLocal: `${date} ${time}`,
     connection,
-    gate: gateReason({ state, settings, now, localTime: time, sentToday: sent, queued }),
+    gate: gateReason({
+      state,
+      settings: { ...settings, dailyCap: dailyCap(state.provider, settings) },
+      now,
+      localTime: time,
+      sentToday: sent,
+      queued,
+    }),
   };
 }
 
 // ── Control ──────────────────────────────────────────────────────
 
-export async function startCampaign(eventId: number): Promise<string | null> {
-  if (!evolutionConfigured()) return 'Configura EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE antes de empezar.';
+export async function startCampaign(eventId: number, provider: WaProvider = 'evolution'): Promise<string | null> {
+  if (provider === 'telnyx' && !telnyxConfigured()) {
+    return 'Configura TELNYX_ACCOUNT_SID, TELNYX_AUTH_TOKEN y TELNYX_WHATSAPP_FROM antes de empezar.';
+  }
+  if (provider === 'evolution' && !evolutionConfigured()) {
+    return 'Configura EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE antes de empezar.';
+  }
   if (publicUrlIsLocal()) return LOCAL_URL_BLOCK;
   const event = Number.isInteger(eventId) && eventId > 0 ? await getEvent(eventId) : undefined;
   if (!event) return 'Elige el evento que quieres enviar.';
   if ((await queuedCount(eventId)) === 0) return `No hay invitados en la cola de "${event.name}". Encólalos desde el evento.`;
+  if (provider === 'telnyx') {
+    const problem = await telnyxTemplateProblem(event);
+    if (problem) return problem;
+  }
   const state = await getState();
-  // Reanudar no se salta la pausa que estaba corriendo: pausar y reanudar no debe acelerar el ritmo.
   await saveState({
     eventId,
+    provider,
     running: true,
     pauseReason: null,
     consecutiveErrors: 0,
-    nextSendAt: Math.max(state.nextSendAt, Date.now()),
+    // Reanudar por Evolution no se salta la pausa que estaba corriendo: pausar y reanudar no debe acelerar el ritmo.
+    nextSendAt: provider === 'telnyx' ? Date.now() : Math.max(state.nextSendAt, Date.now()),
   });
   kick();
   return null;
+}
+
+/** Por qué no se puede enviar este evento por Telnyx, o null si su plantilla está aprobada. */
+export async function telnyxTemplateProblem(event: EventRow): Promise<string | null> {
+  if (!event.telnyx_template) {
+    return `"${event.name}" no tiene plantilla de WhatsApp en Telnyx. Créala desde el evento y espera a que Meta la apruebe.`;
+  }
+  const { status, reason } = await templateApproval(event.telnyx_template.id);
+  if (status === 'approved') return null;
+  return `La plantilla de "${event.name}" no se puede usar todavía (estado: ${APPROVAL_LABEL[status]}${reason ? `: ${reason}` : ''}).`;
 }
 
 export async function pauseCampaign(reason = 'Pausada por el admin') {
@@ -137,10 +183,83 @@ export const dequeueGuest = async (guestId: number) =>
  */
 export const markSent = async (guestId: number) =>
   (await exec(
-    `UPDATE guests SET wa_status = 'sent', wa_sent_at = COALESCE(wa_sent_at, $1), wa_error = NULL
+    `UPDATE guests SET wa_status = 'sent', wa_sent_at = COALESCE(wa_sent_at, $1), wa_error = NULL,
+       wa_provider = CASE WHEN wa_status IN ('pending', 'queued') THEN 'manual' ELSE wa_provider END
      WHERE id = $2 AND wa_status IN ('pending', 'queued', 'uncertain', 'failed')`,
     [nowIso(), guestId],
   )) === 1;
+
+/**
+ * Envía ya mismo por Telnyx a un invitado, fuera de la campaña (para probar o para alguien que se sumó tarde).
+ * Con la API oficial no hace falta esperar turno. Devuelve el error como texto, o null si salió.
+ */
+export async function sendGuestNowTelnyx(guestId: number): Promise<string | null> {
+  if (!telnyxConfigured()) return 'Telnyx no está configurado en el servidor.';
+  if (publicUrlIsLocal()) return 'Telnyx descarga la tarjeta desde PUBLIC_BASE_URL, y en desarrollo apunta a localhost: prueba en producción.';
+  const current = await one<GuestRow>('SELECT * FROM guests WHERE id = $1', [guestId]);
+  if (!current?.phone) return 'El invitado no tiene teléfono.';
+  const event = (await getEvent(current.event_id))!;
+  const problem = await telnyxTemplateProblem(event);
+  if (problem) return problem;
+
+  // Mismo cuidado que la campaña: se marca "sending" antes de llamar, y en un solo paso para no chocar con ella.
+  const guest = await one<GuestRow>(
+    `UPDATE guests SET wa_status = 'sending' WHERE id = $1 AND phone IS NOT NULL AND wa_status <> 'sending' RETURNING *`,
+    [guestId],
+  );
+  if (!guest) return 'Se le está enviando ahora mismo; espera un momento.';
+  try {
+    const messageId = await sendViaTelnyx(event, guest);
+    await recordSent(guest.id, 'telnyx', messageId);
+    return null;
+  } catch (err) {
+    await recordFailure(guest.id, err);
+    return (err as Error).message;
+  }
+}
+
+async function sendViaTelnyx(event: EventRow, guest: GuestRow): Promise<string> {
+  const tpl = event.telnyx_template;
+  if (!tpl) throw new Error('El evento ya no tiene plantilla de Telnyx');
+  // Telnyx descarga la tarjeta de esta app al enviar: se deja generada antes para que responda al instante.
+  await getCardPng(event, guest);
+  const { id } = await sendTemplate({
+    to: guest.phone!,
+    name: tpl.name,
+    language: tpl.language,
+    imageUrl: `${guestUrl(guest.token)}/card.png`,
+    bodyValues: templateValues(tpl.variables, templateVars(event, guest)),
+    webhookUrl: telnyxWebhookUrl(),
+  });
+  return id;
+}
+
+async function sendViaEvolution(event: EventRow, guest: GuestRow, settings: WaSettings): Promise<string | null> {
+  const { messageId } = await sendImage({
+    number: guest.phone!,
+    caption: renderTemplate(event.wa_template, templateVars(event, guest)),
+    png: await getCardPng(event, guest),
+    fileName: 'invitacion.png',
+    delayMs: randInt(settings.typingMinMs, settings.typingMaxMs),
+  });
+  return messageId;
+}
+
+const recordSent = (guestId: number, provider: WaProvider, messageId: string | null) =>
+  exec(`UPDATE guests SET wa_status = 'sent', wa_provider = $1, wa_message_id = $2, wa_sent_at = $3, wa_error = NULL WHERE id = $4`, [
+    provider,
+    messageId,
+    nowIso(),
+    guestId,
+  ]);
+
+/** Guarda el fallo en el invitado y devuelve en qué estado quedó. */
+async function recordFailure(guestId: number, err: unknown): Promise<'no_whatsapp' | 'uncertain' | 'failed'> {
+  const e = err as Error & { notOnWhatsApp?: boolean; uncertain?: boolean };
+  const status = e.notOnWhatsApp ? 'no_whatsapp' : e.uncertain ? 'uncertain' : 'failed';
+  await exec(`UPDATE guests SET wa_status = $1, wa_error = $2 WHERE id = $3`, [status, e.message, guestId]);
+  return status;
+}
 
 // ── Bucle de envío ───────────────────────────────────────────────
 
@@ -202,22 +321,36 @@ async function step() {
   }
 
   const queued = await queuedCount(state.eventId);
-  const reason = gateReason({ state, settings, now, localTime: time, sentToday: await sentToday(), queued });
+  const reason = gateReason({
+    state,
+    settings: { ...settings, dailyCap: dailyCap(state.provider, settings) },
+    now,
+    localTime: time,
+    sentToday: await sentToday(state.provider),
+    queued,
+  });
   if (reason) {
     if (queued === 0) await saveState({ running: false, pauseReason: 'Terminado: no quedan invitados en la cola de este evento' });
     return;
   }
 
-  let conn: string;
-  try {
-    conn = await connectionState();
-  } catch (err) {
-    conn = err instanceof EvolutionError ? `error: ${err.message}` : 'error';
-  }
-  await setConnection(conn);
-  if (conn !== 'open') {
-    await pauseCampaign(`WhatsApp no está conectado (${conn}). Revisa la instancia en Evolution y reanuda.`);
-    return;
+  if (state.provider === 'telnyx') {
+    if (!telnyxConfigured()) {
+      await pauseCampaign('Telnyx no está configurado en el servidor. Revisa las variables TELNYX_* y reanuda.');
+      return;
+    }
+  } else {
+    let conn: string;
+    try {
+      conn = await connectionState();
+    } catch (err) {
+      conn = err instanceof EvolutionError ? `error: ${err.message}` : 'error';
+    }
+    await setConnection(conn);
+    if (conn !== 'open') {
+      await pauseCampaign(`WhatsApp no está conectado (${conn}). Revisa la instancia en Evolution y reanuda.`);
+      return;
+    }
   }
 
   // Se toma al siguiente y se marca "sending" en un solo paso, ANTES de llamar a la API:
@@ -234,21 +367,12 @@ async function step() {
   if (!event) return;
 
   try {
-    const png = await getCardPng(event, guest);
-    const caption = renderTemplate(event.wa_template, templateVars(event, guest));
-    const { messageId } = await sendImage({
-      number: guest.phone,
-      caption,
-      png,
-      fileName: 'invitacion.png',
-      delayMs: randInt(settings.typingMinMs, settings.typingMaxMs),
-    });
-    await exec(`UPDATE guests SET wa_status = 'sent', wa_message_id = $1, wa_sent_at = $2, wa_error = NULL WHERE id = $3`, [
-      messageId,
-      nowIso(),
-      guest.id,
-    ]);
-    const d = nextDelay(state, settings);
+    const messageId = state.provider === 'telnyx' ? await sendViaTelnyx(event, guest) : await sendViaEvolution(event, guest, settings);
+    await recordSent(guest.id, state.provider, messageId);
+    const d =
+      state.provider === 'telnyx'
+        ? { delayMs: randInt(...TELNYX_DELAY_SEC) * 1000, sendsSinceBreak: state.sendsSinceBreak, breakAfter: state.breakAfter, isBreak: false }
+        : nextDelay(state, settings);
     await saveState({
       consecutiveErrors: 0,
       lastError: null,
@@ -260,19 +384,18 @@ async function step() {
     console.log(`[wa] enviado a ${guest.name}; siguiente en ${Math.round(d.delayMs / 1000)} s${d.isBreak ? ' (pausa larga)' : ''}`);
   } catch (err) {
     const message = (err as Error).message;
-    if (err instanceof EvolutionError && err.notOnWhatsApp) {
-      await exec(`UPDATE guests SET wa_status = 'no_whatsapp', wa_error = $1 WHERE id = $2`, [message, guest.id]);
+    if ((await recordFailure(guest.id, err)) === 'no_whatsapp') {
       // No salió ningún mensaje, pero igual hubo una consulta a WhatsApp: pausa corta.
       await saveState({ nextSendAt: Date.now() + randInt(30, 90) * 1000 });
       return;
     }
-    const status = err instanceof EvolutionError && err.uncertain ? 'uncertain' : 'failed';
-    await exec(`UPDATE guests SET wa_status = $1, wa_error = $2 WHERE id = $3`, [status, message, guest.id]);
     const errors = state.consecutiveErrors + 1;
     await saveState({
       consecutiveErrors: errors,
       lastError: message,
-      nextSendAt: Date.now() + randInt(settings.minDelaySec, settings.maxDelaySec) * 1000,
+      nextSendAt:
+        Date.now() +
+        (state.provider === 'telnyx' ? randInt(30, 60) : randInt(settings.minDelaySec, settings.maxDelaySec)) * 1000,
       ...(errors >= MAX_CONSECUTIVE_ERRORS
         ? { running: false, pauseReason: `Pausada tras ${errors} errores seguidos. Último: ${message}` }
         : {}),

@@ -8,7 +8,7 @@ import { tidyName } from '../services/excel';
 import { normalizePhone } from '../services/phone';
 import { clean, isEmail } from '../services/text';
 import { sendOneEmail } from '../worker/emailJob';
-import { dequeueGuest, enqueueGuest, markSent } from '../worker/whatsappQueue';
+import { dequeueGuest, enqueueGuest, markSent, sendGuestNowTelnyx } from '../worker/whatsappQueue';
 import { removeCards } from './events';
 import { parseId } from './util';
 
@@ -143,6 +143,14 @@ export const guestRoutes = new Hono<AppEnv>()
     return (await markSent(id))
       ? c.json(await getGuest(id))
       : c.json({ error: 'No aplica: ya figura como enviado, se está enviando o no tiene teléfono' }, 400);
+  })
+
+  // Envío inmediato por la API oficial: sin cola ni pausas, con la plantilla aprobada del evento.
+  .post('/:id/wa/telnyx-send', async (c) => {
+    const id = parseId(c.req.param('id'));
+    if (!(await getGuest(id))) return c.json({ error: 'Invitado no encontrado' }, 404);
+    const error = await sendGuestNowTelnyx(id);
+    return error ? c.json({ error }, 400) : c.json(await getGuest(id));
   })
 
   .post('/:id/checkin/undo', async (c) => {

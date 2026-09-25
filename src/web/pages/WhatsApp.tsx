@@ -6,7 +6,7 @@ import { PageHeader } from '../components/Layout';
 import { Badge, Button, Card, cx, Field, inputClass, Notice, Spinner, useToast } from '../components/ui';
 import { fmtDateTime, fmtDuration } from '../lib';
 import { useSession } from '../session';
-import type { WaSettings, WaStatusResponse } from '../../shared/types';
+import type { WaProvider, WaSettings, WaStatusResponse } from '../../shared/types';
 
 export function WhatsApp() {
   const { config } = useSession();
@@ -14,6 +14,7 @@ export function WhatsApp() {
   const status = useApi<WaStatusResponse>('/wa/status', 5000);
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [chosenProvider, setChosenProvider] = useState<WaProvider | null>(null);
   const now = useNow();
 
   // Evento por defecto: el de la campaña, o el que tenga invitados en cola.
@@ -32,6 +33,12 @@ export function WhatsApp() {
   const selected = s.queuedByEvent.find((e) => e.eventId === selectedId);
   // Lo que se muestra: el evento que está enviando, o el elegido para empezar.
   const shownQueued = s.state.running ? s.queued : (selected?.queued ?? 0);
+  // Canal: el de la campaña en marcha; si está detenida, el elegido (por defecto el último usado, o el único configurado).
+  const configured: Record<WaProvider, boolean> = { telnyx: config.telnyxConfigured, evolution: config.evolutionConfigured };
+  const provider: WaProvider = s.state.running
+    ? s.state.provider
+    : (chosenProvider ?? (configured[s.state.provider] ? s.state.provider : config.telnyxConfigured ? 'telnyx' : 'evolution'));
+  const today = s.today[provider];
 
   async function run(key: string, fn: () => Promise<void>) {
     setBusy(key);
@@ -46,8 +53,8 @@ export function WhatsApp() {
 
   const start = () =>
     run('start', async () => {
-      status.setData(await api<WaStatusResponse>('/wa/start', { body: { eventId: selectedId } }));
-      toast(`Campaña en marcha: ${selected?.name ?? ''}`);
+      status.setData(await api<WaStatusResponse>('/wa/start', { body: { eventId: selectedId, provider } }));
+      toast(`Campaña en marcha por ${provider === 'telnyx' ? 'Telnyx' : 'Evolution'}: ${selected?.name ?? ''}`);
     });
   const pause = () =>
     run('pause', async () => {
@@ -74,7 +81,7 @@ export function WhatsApp() {
     <>
       <PageHeader
         title="Campaña de WhatsApp"
-        subtitle="Se envía un evento a la vez. El tope diario es uno solo para todos, porque todo sale del mismo número."
+        subtitle="Se envía un evento a la vez. Cada canal sale de su propio número y tiene su propio tope diario, que suma todos los eventos."
       />
 
       {config.localUrl ? (
@@ -82,9 +89,12 @@ export function WhatsApp() {
           <Notice tone="warn">Estás en desarrollo: el QR de las invitaciones apunta a localhost, así que la campaña no se puede iniciar.</Notice>
         </div>
       ) : null}
-      {!config.evolutionConfigured ? (
+      {!config.evolutionConfigured && !config.telnyxConfigured ? (
         <div className="mb-6">
-          <Notice tone="bad">Evolution API no está configurada. Define EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE en el servidor.</Notice>
+          <Notice tone="bad">
+            No hay ningún canal de WhatsApp configurado. Define TELNYX_ACCOUNT_SID, TELNYX_AUTH_TOKEN y TELNYX_WHATSAPP_FROM (API oficial) o
+            EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE en el servidor.
+          </Notice>
         </div>
       ) : null}
 
@@ -99,7 +109,9 @@ export function WhatsApp() {
                   <h2 className="text-xl font-extrabold">{s.state.running ? 'En marcha' : 'Detenida'}</h2>
                 </div>
                 {s.state.running && campaignEvent ? (
-                  <p className="mt-1 font-semibold text-brand">Enviando: {campaignEvent.name}</p>
+                  <p className="mt-1 font-semibold text-brand">
+                    Enviando: {campaignEvent.name} · por {s.state.provider === 'telnyx' ? 'Telnyx' : 'Evolution'}
+                  </p>
                 ) : null}
                 <p className={cx('mt-1', s.state.running ? 'text-white/75' : 'text-ink-mute')}>
                   {sending
@@ -119,9 +131,13 @@ export function WhatsApp() {
                   icon={<Play className="size-4" />}
                   onClick={() => void start()}
                   loading={busy === 'start'}
-                  disabled={!shownQueued || !config.evolutionConfigured || config.localUrl}
+                  disabled={!shownQueued || !configured[provider] || config.localUrl}
                 >
-                  {selectedId === s.state.eventId && shownQueued > 0 && s.state.lastSendAt && !s.state.pauseReason?.startsWith('Terminado')
+                  {selectedId === s.state.eventId &&
+                  provider === s.state.provider &&
+                  shownQueued > 0 &&
+                  s.state.lastSendAt &&
+                  !s.state.pauseReason?.startsWith('Terminado')
                     ? 'Reanudar'
                     : 'Empezar'}
                 </Button>
@@ -129,7 +145,37 @@ export function WhatsApp() {
             </div>
 
             {!s.state.running ? (
-              <div className="border-t border-line px-5 py-4">
+              <div className="grid gap-4 border-t border-line px-5 py-4">
+                {config.telnyxConfigured ? (
+                  <fieldset>
+                    <legend className="mb-1.5 text-sm font-bold text-ink-soft">Enviar con</legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <ProviderOption
+                        title="Telnyx · API oficial"
+                        detail="Plantilla aprobada por Meta: no se bloquea el número por enviar en automático. Cada mensaje tiene costo."
+                        checked={provider === 'telnyx'}
+                        onChange={() => setChosenProvider('telnyx')}
+                      />
+                      <ProviderOption
+                        title="Evolution · número secundario"
+                        detail={
+                          config.evolutionConfigured
+                            ? 'Sin costo por mensaje, pero con riesgo de bloqueo: va lento a propósito.'
+                            : 'No está configurado en el servidor.'
+                        }
+                        checked={provider === 'evolution'}
+                        disabled={!config.evolutionConfigured}
+                        onChange={() => setChosenProvider('evolution')}
+                      />
+                    </div>
+                    {provider === 'telnyx' ? (
+                      <p className="mt-2 text-sm text-ink-mute">
+                        Por Telnyx sale un mensaje cada 10 s aproximadamente, dentro del horario y hasta {s.today.telnyx.cap} al día. El evento
+                        necesita su plantilla aprobada.
+                      </p>
+                    ) : null}
+                  </fieldset>
+                ) : null}
                 <Field label="Evento a enviar" hint="Solo se envía a los invitados en cola de este evento. Encólalos desde el detalle del evento.">
                   <select className={inputClass} value={selectedId ?? ''} onChange={(e) => setSelectedId(Number(e.target.value))}>
                     {s.queuedByEvent.length === 0 ? <option value="">No hay eventos</option> : null}
@@ -145,9 +191,9 @@ export function WhatsApp() {
 
             <div className="grid grid-cols-2 divide-x divide-line border-t border-line sm:grid-cols-3">
               <Metric label="En cola" value={shownQueued} />
-              <Metric label="Hoy" value={`${s.sentToday} / ${s.settings.dailyCap}`}>
+              <Metric label={`Hoy · ${provider === 'telnyx' ? 'Telnyx' : 'Evolution'}`} value={`${today.sent} / ${today.cap}`}>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
-                  <div className="h-full bg-brand" style={{ width: `${Math.min(100, (s.sentToday / s.settings.dailyCap) * 100)}%` }} />
+                  <div className="h-full bg-brand" style={{ width: `${Math.min(100, (today.sent / today.cap) * 100)}%` }} />
                 </div>
               </Metric>
               <Metric label="Horario" value={`${s.settings.windowStart}–${s.settings.windowEnd}`} hint={s.inWindow ? 'Dentro del horario' : 'Fuera de horario'} />
@@ -155,7 +201,7 @@ export function WhatsApp() {
 
             {shownQueued > 0 ? (
               <p className="border-t border-line px-5 py-3 text-sm text-ink-mute">
-                A este ritmo, la cola de este evento termina en unos <b className="text-ink">{estimateDays(s, shownQueued)}</b>.
+                A este ritmo, la cola de este evento termina en unos <b className="text-ink">{estimate(provider, today, shownQueued)}</b>.
                 {s.state.lastSendAt ? ` Último envío: ${fmtDateTime(new Date(s.state.lastSendAt).toISOString())}.` : ''}
               </p>
             ) : null}
@@ -172,7 +218,7 @@ export function WhatsApp() {
         <aside className="grid content-start gap-6">
           <Card className="p-5">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-bold">Conexión</h2>
+              <h2 className="text-lg font-bold">Conexión · Evolution</h2>
               <Badge tone={connected ? 'ok' : s.connection.state === 'unknown' ? 'neutral' : 'bad'}>
                 {connected ? 'Conectado' : s.connection.state === 'unknown' ? 'Sin revisar' : s.connection.state}
               </Badge>
@@ -240,12 +286,46 @@ function Metric({ label, value, hint, children }: { label: string; value: string
   );
 }
 
-/** Días hábiles de envío que faltan, según el tope diario (lo que manda es el tope, no las pausas). */
-function estimateDays(s: WaStatusResponse, queued: number): string {
-  const leftToday = Math.max(0, s.settings.dailyCap - s.sentToday);
+/**
+ * Cuánto falta para terminar la cola. Con Evolution manda el tope diario, no las pausas; con Telnyx, si cabe en
+ * el tope de hoy, se estima a un mensaje cada 10 s.
+ */
+function estimate(provider: WaProvider, today: { sent: number; cap: number }, queued: number): string {
+  const leftToday = Math.max(0, today.cap - today.sent);
+  if (provider === 'telnyx' && queued <= leftToday) return `${Math.max(1, Math.ceil((queued * 10) / 60))} min`;
   const rest = Math.max(0, queued - leftToday);
-  const days = rest === 0 ? 1 : 1 + Math.ceil(rest / s.settings.dailyCap);
+  const days = rest === 0 ? 1 : 1 + Math.ceil(rest / today.cap);
   return days === 1 ? 'hoy o mañana' : `${days} días`;
+}
+
+function ProviderOption({
+  title,
+  detail,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  detail: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label
+      className={cx(
+        'flex cursor-pointer gap-3 rounded-lg border p-3',
+        checked ? 'border-brand bg-brand/10' : 'border-line',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <input type="radio" name="provider" className="mt-1 size-4 accent-[#fab822]" checked={checked} disabled={disabled} onChange={onChange} />
+      <span>
+        <span className="block font-semibold">{title}</span>
+        <span className="block text-sm text-ink-mute">{detail}</span>
+      </span>
+    </label>
+  );
 }
 
 function useNow() {
@@ -326,7 +406,7 @@ function SettingsForm({ settings, onSaved }: { settings: WaSettings; onSaved: (s
     <Card>
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 p-5 text-left">
         <div>
-          <h2 className="text-lg font-bold">Ritmo de envío</h2>
+          <h2 className="text-lg font-bold">Ritmo de envío · Evolution</h2>
           <p className="text-sm text-ink-mute">
             {settings.dailyCap} al día · cada {round(settings.minDelaySec / 60)}–{round(settings.maxDelaySec / 60)} min · pausa larga cada{' '}
             {settings.breakEveryMin}–{settings.breakEveryMax}

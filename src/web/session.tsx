@@ -6,6 +6,8 @@ export interface AppConfig {
   /** Nombre que escribió al entrar (los porteros quedan registrados en cada ingreso). */
   name: string;
   evolutionConfigured: boolean;
+  /** WhatsApp por la API oficial de Telnyx, con plantillas aprobadas por Meta. */
+  telnyxConfigured: boolean;
   resendConfigured: boolean;
   publicBaseUrl: string;
   /** El QR apunta a localhost (desarrollo): los envíos masivos están bloqueados. */

@@ -30,6 +30,19 @@ export const config = {
   webhookSecret: env('WEBHOOK_SECRET'),
   senderPhoneDisplay: env('SENDER_PHONE_DISPLAY'),
 
+  // WhatsApp por la API oficial (Telnyx). Opcional: convive con Evolution y se elige al empezar la campaña.
+  telnyx: {
+    apiKey: env('TELNYX_API_KEY'),
+    // Número de WhatsApp de la cuenta de WhatsApp Business conectada a Telnyx, con código de país.
+    from: env('TELNYX_WHATSAPP_FROM').replace(/\D/g, '').replace(/^(?=\d)/, '+'),
+    // Cuenta de WhatsApp Business (WABA): se necesita para crear las plantillas.
+    wabaId: env('TELNYX_WABA_ID'),
+    // Llave pública del portal de Telnyx para verificar la firma de los avisos de entrega.
+    publicKey: env('TELNYX_PUBLIC_KEY'),
+    // Tope diario propio de Telnyx. Meta empieza con un límite de personas distintas al día por número.
+    dailyCap: Number(env('TELNYX_DAILY_CAP', '250')) || 250,
+  },
+
   resend: {
     apiKey: env('RESEND_API_KEY'),
     from: env('EMAIL_FROM', 'Urbby <invitaciones@urbby.app>'),
@@ -41,6 +54,8 @@ export const evolutionConfigured = () =>
   Boolean(config.evolution.url && config.evolution.apiKey && config.evolution.instance);
 
 export const resendConfigured = () => Boolean(config.resend.apiKey);
+
+export const telnyxConfigured = () => Boolean(config.telnyx.apiKey && config.telnyx.from);
 
 /**
  * El QR de cada invitación lleva PUBLIC_BASE_URL. Si apunta a esta PC (desarrollo), las invitaciones
