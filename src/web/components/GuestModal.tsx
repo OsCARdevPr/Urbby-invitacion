@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Download, ExternalLink } from 'lucide-react';
 import { api } from '../api';
 import { Badge, Button, Field, inputClass, Modal, Notice, useToast } from './ui';
+import { InvitationMessage } from './InvitationMessage';
 import { EMAIL_LABEL, fmtDateTime, formatPhone, WA_LABEL } from '../lib';
 import type { EventRow, GuestRow } from '../../shared/types';
 
@@ -55,6 +56,8 @@ export function GuestModal({
 
   const canEnqueue = g.phone && !['queued', 'sending', 'skipped'].includes(g.wa_status);
   const alreadySent = ['sent', 'delivered', 'read'].includes(g.wa_status);
+  // La versión cambia con los datos que salen en la tarjeta, para no mostrar una vieja de la caché del navegador.
+  const cardUrl = `/i/${g.token}/card.png?v=${encodeURIComponent(`${event.name}${event.date}${event.time}${event.venue}${g.name}${g.business}`)}`;
 
   return (
     <Modal open onClose={onClose} title={g.name} wide>
@@ -72,7 +75,7 @@ export function GuestModal({
         <div className="grid gap-5 sm:grid-cols-[240px_1fr]">
           <div>
             <img
-              src={`/i/${g.token}/card.png?v=${encodeURIComponent(`${event.name}${event.date}${event.time}${event.venue}${g.name}${g.business}`)}`}
+              src={cardUrl}
               alt={`Tarjeta de ${g.name}`}
               className="w-full rounded-lg border border-line bg-navy"
             />
@@ -104,6 +107,8 @@ export function GuestModal({
               <dt className="text-ink-mute">Correo</dt>
               <dd className="font-semibold break-all">{g.email ?? '—'}</dd>
             </dl>
+
+            <InvitationMessage guest={g} event={event} cardUrl={cardUrl} onChanged={onChanged} />
 
             <section className="rounded-lg border border-line p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -194,12 +199,41 @@ export function GuestModal({
 }
 
 function EditGuest({ guest, onCancel, onSaved }: { guest: GuestRow; onCancel: () => void; onSaved: () => Promise<void> }) {
-  const [form, setForm] = useState({
-    name: guest.name,
-    business: guest.business,
-    phone: guest.phone ? formatPhone(guest.phone) : '',
-    email: guest.email ?? '',
-  });
+  return (
+    <GuestForm
+      initial={{ name: guest.name, business: guest.business, phone: guest.phone ? formatPhone(guest.phone) : '', email: guest.email ?? '' }}
+      notice={
+        (guest.wa_status !== 'pending' && guest.wa_status !== 'skipped') || guest.email_status === 'sent' ? (
+          <Notice tone="info">La tarjeta se regenera con los datos nuevos. Lo que ya se envió no cambia: reenvíalo si hace falta.</Notice>
+        ) : null
+      }
+      submitLabel="Guardar"
+      onCancel={onCancel}
+      onSubmit={async (form) => {
+        await api(`/guests/${guest.id}`, { method: 'PATCH', body: form });
+        await onSaved();
+      }}
+    />
+  );
+}
+
+export type GuestFormValues = { name: string; business: string; phone: string; email: string };
+
+/** Nombre, negocio y contacto de un invitado: sirve para editarlo y para agregar uno nuevo. */
+export function GuestForm({
+  initial,
+  notice,
+  submitLabel,
+  onCancel,
+  onSubmit,
+}: {
+  initial: GuestFormValues;
+  notice?: ReactNode;
+  submitLabel: string;
+  onCancel: () => void;
+  onSubmit: (form: GuestFormValues) => Promise<void>;
+}) {
+  const [form, setForm] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
@@ -209,8 +243,7 @@ function EditGuest({ guest, onCancel, onSaved }: { guest: GuestRow; onCancel: ()
     setSaving(true);
     setError(null);
     try {
-      await api(`/guests/${guest.id}`, { method: 'PATCH', body: form });
-      await onSaved();
+      await onSubmit(form);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
@@ -233,16 +266,14 @@ function EditGuest({ guest, onCancel, onSaved }: { guest: GuestRow; onCancel: ()
           <input className={inputClass} value={form.email} onChange={set('email')} type="email" />
         </Field>
       </div>
-      {(guest.wa_status !== 'pending' && guest.wa_status !== 'skipped') || guest.email_status === 'sent' ? (
-        <Notice tone="info">La tarjeta se regenera con los datos nuevos. Lo que ya se envió no cambia: reenvíalo si hace falta.</Notice>
-      ) : null}
+      {notice}
       {error ? <Notice tone="bad">{error}</Notice> : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancelar
         </Button>
         <Button type="submit" variant="primary" loading={saving}>
-          Guardar
+          {submitLabel}
         </Button>
       </div>
     </form>

@@ -131,11 +131,14 @@ export const enqueueGuest = async (guestId: number) =>
 export const dequeueGuest = async (guestId: number) =>
   (await exec(`UPDATE guests SET wa_status = 'pending', wa_queued_at = NULL WHERE id = $1 AND wa_status = 'queued'`, [guestId])) === 1;
 
-/** Para los "inciertos": el admin revisó el chat y el mensaje sí llegó. */
+/**
+ * Marca el WhatsApp como enviado: un "incierto" que sí llegó según el chat, o una invitación que el admin
+ * mandó a mano desde su teléfono. Así la campaña no se la vuelve a enviar.
+ */
 export const markSent = async (guestId: number) =>
   (await exec(
     `UPDATE guests SET wa_status = 'sent', wa_sent_at = COALESCE(wa_sent_at, $1), wa_error = NULL
-     WHERE id = $2 AND wa_status IN ('uncertain', 'failed')`,
+     WHERE id = $2 AND wa_status IN ('pending', 'queued', 'uncertain', 'failed')`,
     [nowIso(), guestId],
   )) === 1;
 
