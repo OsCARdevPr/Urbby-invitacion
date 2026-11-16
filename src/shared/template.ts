@@ -81,3 +81,59 @@ export function templateVars(event: TemplateEvent, guest: Pick<GuestRow, 'name' 
 export function renderTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (match, key: string) => (key in vars ? vars[key] : match));
 }
+
+/** Extrae las variables {clave} usadas en una plantilla (sin llaves ni duplicados). */
+export function extractTemplateVariables(template: string): string[] {
+  const matches = [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+  return [...new Set(matches)];
+}
+
+/**
+ * Valida una plantilla frente a las columnas disponibles y las filas de destinatarios.
+ * - Verifica que todas las variables usadas existan en las columnas disponibles (o sean derivables, como {primer_nombre} desde {nombre}).
+ * - Verifica que ninguna fila tenga valores faltantes o vacíos para las variables usadas.
+ */
+export function validateCampaignVariables(
+  template: string,
+  availableColumns: string[],
+  rows: { row: number; variables: Record<string, string> }[],
+): {
+  valid: boolean;
+  usedVariables: string[];
+  unknownVariables: string[];
+  missingByRow: { row: number; missing: string[] }[];
+} {
+  const used = extractTemplateVariables(template);
+  const available = new Set(availableColumns);
+  if (available.has('nombre') || available.has('name')) {
+    available.add('primer_nombre');
+  }
+
+  const unknown = used.filter((v) => !available.has(v));
+  const missingByRow: { row: number; missing: string[] }[] = [];
+
+  const validVars = used.filter((v) => available.has(v));
+  for (const r of rows) {
+    const missing: string[] = [];
+    for (const v of validVars) {
+      let val = r.variables[v];
+      if (v === 'primer_nombre' && (val === undefined || val === '')) {
+        const nameVal = r.variables['nombre'] ?? r.variables['name'] ?? '';
+        val = nameVal.trim().split(/\s+/)[0] ?? '';
+      }
+      if (val === undefined || val === null || String(val).trim() === '') {
+        missing.push(v);
+      }
+    }
+    if (missing.length > 0) {
+      missingByRow.push({ row: r.row, missing });
+    }
+  }
+
+  return {
+    valid: unknown.length === 0 && missingByRow.length === 0,
+    usedVariables: used,
+    unknownVariables: unknown,
+    missingByRow,
+  };
+}

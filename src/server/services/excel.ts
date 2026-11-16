@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import type { ImportRow } from '../../shared/types';
+import type { ImportRow, MarketingImportPreview, MarketingImportRow } from '../../shared/types';
 import { clean, fold, isEmail } from './text';
 import { normalizePhone } from './phone';
 
@@ -253,4 +253,188 @@ export function validateRows(rows: RawRow[], existing: { phones: Set<string>; em
       messages,
     };
   });
+}
+
+/**
+ * Normaliza un encabezado a una clave simple de variable (letras minúsculas sin acentos, dígitos y guión bajo).
+ */
+export function normalizeHeader(raw: string): string {
+  return fold(raw)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Lee una lista de marketing desde un archivo Excel (.xlsx) o CSV.
+ * - Extrae todos los encabezados y los normaliza a claves simples.
+ * - Detecta encabezados vacíos o duplicados.
+ * - Detecta automáticamente la columna de teléfono o usa `selectedPhoneCol` si se especifica.
+ * - Si no se detecta y no se especificó, `needsPhoneColumn = true`.
+ * - Devuelve las filas validadas con sus variables y estadísticas.
+ */
+export async function readMarketingFile(
+  buffer: ArrayBuffer,
+  selectedPhoneCol?: string,
+): Promise<MarketingImportPreview> {
+  const bytes = new Uint8Array(buffer);
+  let grids: Grid[];
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    grids = await xlsxGrids(buffer);
+  } else if (bytes[0] === 0xd0 && bytes[1] === 0xcf) {
+    throw new Error('Es un Excel antiguo (.xls). Guárdalo como .xlsx o como CSV e inténtalo de nuevo.');
+  } else {
+    grids = [parseCsv(decodeText(bytes))];
+  }
+
+  for (const grid of grids) {
+    for (let h = 0; h < Math.min(10, grid.length); h++) {
+      const rowCells = grid[h];
+      let lastNonEmpty = -1;
+      for (let c = rowCells.length - 1; c >= 0; c--) {
+        if (clean(rowCells[c])) {
+          lastNonEmpty = c;
+          break;
+        }
+      }
+      if (lastNonEmpty < 0) continue;
+
+      const columns: { key: string; label: string }[] = [];
+      const seenKeys = new Map<string, string>();
+      let headerError: string | null = null;
+
+      for (let c = 0; c <= lastNonEmpty; c++) {
+        const rawLabel = clean(rowCells[c] ?? '');
+        if (!rawLabel) {
+          headerError = `La columna ${c + 1} no tiene encabezado.`;
+          break;
+        }
+        const key = normalizeHeader(rawLabel);
+        if (!key) {
+          headerError = `El encabezado "${rawLabel}" en la columna ${c + 1} no contiene caracteres válidos para una variable.`;
+          break;
+        }
+        if (seenKeys.has(key)) {
+          headerError = `Encabezados duplicados: "${seenKeys.get(key)}" y "${rawLabel}" producen la misma clave "{${key}}" para variables.`;
+          break;
+        }
+        seenKeys.set(key, rawLabel);
+        columns.push({ key, label: rawLabel });
+      }
+
+      if (headerError) {
+        throw new Error(headerError);
+      }
+
+      if (columns.length === 0) continue;
+
+      let phoneCol: string | null = null;
+      if (selectedPhoneCol && columns.some((c) => c.key === selectedPhoneCol)) {
+        phoneCol = selectedPhoneCol;
+      } else {
+        const phoneAliases = HEADER_ALIASES.phone.map(normalizeHeader);
+        const match = columns.find(
+          (c) =>
+            phoneAliases.includes(c.key) ||
+            c.key.startsWith('telefono') ||
+            c.key.startsWith('celular') ||
+            c.key.endsWith('_telefono') ||
+            c.key.endsWith('_celular'),
+        );
+        if (match) {
+          phoneCol = match.key;
+        }
+      }
+
+      const needsPhoneColumn = !phoneCol;
+      const rows: MarketingImportRow[] = [];
+      const seenPhones = new Map<string, number>();
+      let validCount = 0;
+      let invalidPhoneCount = 0;
+      let duplicateCount = 0;
+
+      for (let i = h + 1; i < grid.length; i++) {
+        const cells = grid[i];
+        const hasContent = cells.some((cell) => Boolean(clean(cell)));
+        if (!hasContent) continue;
+
+        const rowNum = i + 1;
+        const variables: Record<string, string> = {};
+        for (let c = 0; c < columns.length; c++) {
+          variables[columns[c].key] = clean(cells[c] ?? '');
+        }
+
+        if ((variables.nombre || variables.name) && !variables.primer_nombre) {
+          const rawName = variables.nombre || variables.name;
+          variables.primer_nombre = rawName.split(/\s+/)[0] ?? '';
+        }
+
+        const nameKey = columns.find((c) =>
+          ['nombre', 'name', 'nombre_completo', 'cliente', 'destinatario'].includes(c.key),
+        )?.key;
+        const name = nameKey && variables[nameKey] ? tidyName(variables[nameKey]) : (variables.nombre ? tidyName(variables.nombre) : '');
+
+        const rawPhone = phoneCol ? variables[phoneCol] ?? '' : '';
+        const messages: string[] = [];
+        let status: ImportRow['status'] = 'ok';
+        let phone: string | null = null;
+
+        if (phoneCol) {
+          if (!rawPhone) {
+            status = 'error';
+            messages.push('Falta el número de teléfono');
+            invalidPhoneCount++;
+          } else {
+            const p = normalizePhone(rawPhone);
+            if (!p.ok) {
+              status = 'error';
+              messages.push(p.error || 'Teléfono no válido');
+              invalidPhoneCount++;
+            } else {
+              phone = p.phone;
+              if (p.warning) messages.push(p.warning);
+
+              if (seenPhones.has(phone)) {
+                status = 'duplicate';
+                messages.push(`Repetido: igual que la fila ${seenPhones.get(phone)}`);
+                duplicateCount++;
+              } else {
+                seenPhones.set(phone, rowNum);
+                status = messages.length ? 'warning' : 'ok';
+                validCount++;
+              }
+            }
+          }
+        } else {
+          status = 'ok';
+          validCount++;
+        }
+
+        rows.push({
+          row: rowNum,
+          name,
+          phone,
+          rawPhone,
+          variables,
+          status,
+          messages,
+        });
+      }
+
+      return {
+        columns,
+        phoneColumn: phoneCol,
+        needsPhoneColumn,
+        rows,
+        stats: {
+          total: rows.length,
+          valid: validCount,
+          invalidPhone: invalidPhoneCount,
+          duplicates: duplicateCount,
+        },
+      };
+    }
+  }
+
+  throw new Error('No se encontró ninguna tabla de contactos en el archivo.');
 }

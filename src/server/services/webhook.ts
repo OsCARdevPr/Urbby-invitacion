@@ -51,6 +51,18 @@ export async function handleMessagesUpdate(data: unknown) {
         }
         break;
       }
+      // Si no es invitación ni difusión, puede ser una campaña de marketing.
+      const cr = await one<{ id: number; campaign_id: number; status: string }>(
+        `SELECT id, campaign_id, status FROM campaign_recipients WHERE message_id = $1`,
+        [id],
+      );
+      if (cr) {
+        const current = RANK[cr.status];
+        if (current !== undefined && RANK[status]! > current) {
+          await exec(`UPDATE campaign_recipients SET status = $1 WHERE id = $2`, [status, cr.id]);
+        }
+        break;
+      }
     }
   }
 }
