@@ -122,19 +122,23 @@ export async function connectionState(): Promise<string> {
 export async function sendImage(opts: {
   number: string;
   caption: string;
-  png: Buffer;
+  png?: Buffer;
+  buffer?: Buffer;
   fileName: string;
+  mimetype?: string;
   delayMs: number;
 }): Promise<{ messageId: string | null }> {
+  const buf = opts.buffer ?? opts.png!;
+  const mimetype = opts.mimetype ?? 'image/png';
   const data = await call<{ key?: { id?: string } }>(
     'POST',
     `/message/sendMedia/${inst()}`,
     {
       number: opts.number,
       mediatype: 'image',
-      mimetype: 'image/png',
+      mimetype,
       caption: opts.caption,
-      media: opts.png.toString('base64'),
+      media: buf.toString('base64'),
       fileName: opts.fileName,
       delay: opts.delayMs,
     },

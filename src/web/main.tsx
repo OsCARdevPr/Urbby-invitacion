@@ -20,6 +20,7 @@ import { WhatsApp } from './pages/WhatsApp';
 import { Scan } from './pages/Scan';
 import { Connections } from './pages/Connections';
 import { Broadcasts } from './pages/Broadcasts';
+import { Marketing } from './pages/Marketing';
 
 function App() {
   const [config, setConfig] = useState<AppConfig | null | 'loading'>('loading');
@@ -68,6 +69,7 @@ function App() {
             <Route path="/events/:id/edit" element={<EventForm />} />
             <Route path="/whatsapp" element={<WhatsApp />} />
             <Route path="/difusiones" element={<Broadcasts />} />
+            <Route path="/marketing" element={<Marketing />} />
             <Route path="/conexiones" element={<Connections />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

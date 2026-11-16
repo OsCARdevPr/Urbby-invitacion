@@ -83,6 +83,8 @@ export interface WaState {
   eventId: number | null;
   /** Si no es null, la campaña está enviando esta difusión (de ese mismo evento) en vez de las invitaciones. */
   broadcastId: number | null;
+  /** Si no es null, la campaña está enviando esta campaña de marketing independiente. */
+  campaignId: number | null;
   running: boolean;
   pauseReason: string | null;
   nextSendAt: number; // epoch ms
@@ -151,6 +153,61 @@ export interface BroadcastRecipient {
   status: BroadcastStatus;
   error: string | null;
   sent_at: string | null;
+}
+
+// ── Marketing ──────────────────────────────────────────────────────────────
+
+export type CampaignStatus = BroadcastStatus;
+
+export interface CampaignSummary {
+  id: number;
+  name: string;
+  message: string;
+  image_id: string | null;
+  image_filename: string | null;
+  created_at: string;
+  total: number;
+  queued: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  problems: number;
+  cancelled: number;
+}
+
+export interface CampaignRecipient {
+  id: number;
+  campaign_id: number;
+  phone: string;
+  name: string;
+  variables: Record<string, string>;
+  status: CampaignStatus;
+  message_id: string | null;
+  sent_at: string | null;
+  error: string | null;
+}
+
+export interface MarketingImportRow {
+  row: number;
+  name: string;
+  phone: string | null;
+  rawPhone: string;
+  variables: Record<string, string>;
+  status: ImportRowStatus;
+  messages: string[];
+}
+
+export interface MarketingImportPreview {
+  columns: { key: string; label: string }[];
+  phoneColumn: string | null;
+  needsPhoneColumn: boolean;
+  rows: MarketingImportRow[];
+  stats: {
+    total: number;
+    valid: number;
+    invalidPhone: number;
+    duplicates: number;
+  };
 }
 
 export type ImportRowStatus = 'ok' | 'warning' | 'error' | 'duplicate';

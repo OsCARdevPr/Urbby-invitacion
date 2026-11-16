@@ -45,8 +45,13 @@ async function saveState(patch: Partial<WaState>): Promise<WaState> {
 export const setConnection = (state: string) => kvSet(CONNECTION_KEY, { state, checkedAt: nowIso() });
 export const getConnection = () => kvGet<{ state: string; checkedAt: string | null }>(CONNECTION_KEY, { state: 'unknown', checkedAt: null });
 
-/** En cola de lo que envía la campaña: la difusión, si hay una, o las invitaciones del evento. */
-async function queuedCount(target: Pick<WaState, 'eventId' | 'broadcastId'>): Promise<number> {
+/** En cola de lo que envía la campaña: la campaña de marketing, la difusión o las invitaciones del evento. */
+async function queuedCount(target: Pick<WaState, 'eventId' | 'broadcastId' | 'campaignId'>): Promise<number> {
+  if (target.campaignId !== null && target.campaignId !== undefined) {
+    return (await one<{ n: number }>(`SELECT count(*) AS n FROM campaign_recipients WHERE campaign_id = $1 AND status = 'queued'`, [
+      target.campaignId,
+    ]))!.n;
+  }
   if (target.broadcastId !== null) {
     return (await one<{ n: number }>(`SELECT count(*) AS n FROM broadcast_recipients WHERE broadcast_id = $1 AND status = 'queued'`, [
       target.broadcastId,
@@ -63,11 +68,12 @@ const queuedByEvent = () =>
      GROUP BY e.id ORDER BY e.date, e.id`,
   );
 
-/** Mensajes enviados hoy (hora de El Salvador) desde este número: invitaciones y difusiones de todos los eventos. */
+/** Mensajes enviados hoy (hora de El Salvador) desde este número: invitaciones, difusiones y campañas. */
 const sentToday = async () =>
   (await one<{ n: number }>(
     `SELECT (SELECT count(*) FROM guests WHERE (wa_sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date)
-          + (SELECT count(*) FROM broadcast_recipients WHERE (sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date) AS n`,
+          + (SELECT count(*) FROM broadcast_recipients WHERE (sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date)
+          + (SELECT count(*) FROM campaign_recipients WHERE (sent_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date) AS n`,
     [config.tz],
   ))!.n;
 
@@ -97,11 +103,23 @@ export async function waStatus(): Promise<WaStatusResponse> {
 
 // ── Control ──────────────────────────────────────────────────────
 
-/** Empieza (o reanuda) la campaña con las invitaciones de un evento o con una difusión. */
-export async function startCampaign(target: { eventId: number } | { broadcastId: number }): Promise<string | null> {
+/** Empieza (o reanuda) la campaña con las invitaciones de un evento, una difusión o una campaña de marketing. */
+export async function startCampaign(
+  target: { eventId: number } | { broadcastId: number } | { campaignId: number },
+): Promise<string | null> {
   if (!evolutionConfigured()) return 'Configura EVOLUTION_URL, EVOLUTION_API_KEY y EVOLUTION_INSTANCE antes de empezar.';
-  let next: Pick<WaState, 'eventId' | 'broadcastId'>;
-  if ('broadcastId' in target) {
+  let next: Pick<WaState, 'eventId' | 'broadcastId' | 'campaignId'>;
+  if ('campaignId' in target) {
+    if (publicUrlIsLocal()) {
+      return 'PUBLIC_BASE_URL apunta a localhost (desarrollo): las campañas están bloqueadas para no escribirle a contactos reales desde una copia de prueba.';
+    }
+    const c = Number.isInteger(target.campaignId)
+      ? await one<{ id: number }>('SELECT id FROM campaigns WHERE id = $1', [target.campaignId])
+      : undefined;
+    if (!c) return 'Campaña no encontrada.';
+    next = { eventId: null, broadcastId: null, campaignId: c.id };
+    if ((await queuedCount(next)) === 0) return 'Esta campaña no tiene mensajes en cola.';
+  } else if ('broadcastId' in target) {
     if (publicUrlIsLocal()) {
       return 'PUBLIC_BASE_URL apunta a localhost (desarrollo): las difusiones están bloqueadas para no escribirle a invitados reales desde una copia de prueba.';
     }
@@ -109,13 +127,13 @@ export async function startCampaign(target: { eventId: number } | { broadcastId:
       ? await one<{ id: number; event_id: number }>('SELECT id, event_id FROM broadcasts WHERE id = $1', [target.broadcastId])
       : undefined;
     if (!b) return 'Difusión no encontrada.';
-    next = { eventId: b.event_id, broadcastId: b.id };
+    next = { eventId: b.event_id, broadcastId: b.id, campaignId: null };
     if ((await queuedCount(next)) === 0) return 'Esta difusión no tiene mensajes en cola.';
   } else {
     if (publicUrlIsLocal()) return LOCAL_URL_BLOCK;
     const event = Number.isInteger(target.eventId) && target.eventId > 0 ? await getEvent(target.eventId) : undefined;
     if (!event) return 'Elige el evento que quieres enviar.';
-    next = { eventId: event.id, broadcastId: null };
+    next = { eventId: event.id, broadcastId: null, campaignId: null };
     if ((await queuedCount(next)) === 0) return `No hay invitados en la cola de "${event.name}". Encólalos desde el evento.`;
   }
   const state = await getState();
@@ -183,8 +201,13 @@ export async function startWorker() {
        error = 'El servidor se reinició durante el envío: revisa el chat antes de reintentar'
      WHERE status = 'sending'`,
   );
-  if (interrupted + interruptedBroadcast) {
-    console.warn(`[wa] ${interrupted + interruptedBroadcast} envío(s) quedaron inciertos tras el reinicio`);
+  const interruptedCampaign = await exec(
+    `UPDATE campaign_recipients SET status = 'uncertain',
+       error = 'El servidor se reinició durante el envío: revisa el chat antes de reintentar'
+     WHERE status = 'sending'`,
+  );
+  if (interrupted + interruptedBroadcast + interruptedCampaign) {
+    console.warn(`[wa] ${interrupted + interruptedBroadcast + interruptedCampaign} envío(s) quedaron inciertos tras el reinicio`);
   }
 
   stopped = false;
@@ -237,7 +260,11 @@ async function step() {
       await saveState({
         running: false,
         pauseReason:
-          state.broadcastId !== null ? 'Terminado: la difusión ya se envió a todos' : 'Terminado: no quedan invitados en la cola de este evento',
+          state.campaignId !== null
+            ? 'Terminado: la campaña ya se envió a todos'
+            : state.broadcastId !== null
+              ? 'Terminado: la difusión ya se envió a todos'
+              : 'Terminado: no quedan invitados en la cola de este evento',
       });
     }
     return;
@@ -257,7 +284,12 @@ async function step() {
 
   // Se toma al siguiente y se marca "sending" en un solo paso, ANTES de llamar a la API:
   // si el proceso muere aquí, al reiniciar queda incierto en vez de reenviarse.
-  const job = state.broadcastId !== null ? await nextBroadcastJob(state.broadcastId, settings) : await nextInvitationJob(state.eventId, settings);
+  const job =
+    state.campaignId !== null
+      ? await nextCampaignJob(state.campaignId, settings)
+      : state.broadcastId !== null
+        ? await nextBroadcastJob(state.broadcastId, settings)
+        : await nextInvitationJob(state.eventId, settings);
   if (!job) return;
 
   try {
@@ -373,5 +405,82 @@ async function nextBroadcastJob(broadcastId: number, settings: WaSettings): Prom
       ).messageId,
     done: (messageId) => setRecipient(`status = 'sent', message_id = $3, sent_at = $4, error = NULL`, [messageId, nowIso()]),
     fail: (status, error) => setRecipient(`status = $3, error = $4`, [status, error]),
+  };
+}
+
+/** El siguiente mensaje de la campaña de marketing: texto o imagen con pie, con las variables del contacto. */
+async function nextCampaignJob(campaignId: number, settings: WaSettings): Promise<Job | null> {
+  const picked = await one<{ id: number }>(
+    `UPDATE campaign_recipients SET status = 'sending'
+     WHERE id = (
+       SELECT id FROM campaign_recipients WHERE campaign_id = $1 AND status = 'queued'
+       ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+     RETURNING id`,
+    [campaignId],
+  );
+  if (!picked) return null;
+  const setRecipient = (sql: string, params: unknown[]) =>
+    exec(`UPDATE campaign_recipients SET ${sql} WHERE id = $1`, [picked.id, ...params]);
+
+  const row = await one<{
+    id: number;
+    campaign_id: number;
+    phone: string;
+    name: string;
+    variables: Record<string, string>;
+    campaign_message: string;
+    image_id: string | null;
+  }>(
+    `SELECT r.id, r.campaign_id, r.phone, r.name, r.variables, c.message AS campaign_message, c.image_id
+     FROM campaign_recipients r JOIN campaigns c ON c.id = r.campaign_id
+     WHERE r.id = $1`,
+    [picked.id],
+  );
+  if (!row) return null;
+  if (!row.phone) {
+    await setRecipient(`status = 'failed', error = $2`, ['Falta el teléfono del destinatario']);
+    return null;
+  }
+
+  const rendered = renderTemplate(row.campaign_message, row.variables ?? {});
+  const delayMs = randInt(settings.typingMinMs, settings.typingMaxMs);
+
+  if (row.image_id) {
+    const image = await one<{ data: Buffer; mimetype: string; filename: string }>(
+      `SELECT data, mimetype, filename FROM campaign_images WHERE id = $1`,
+      [row.image_id],
+    );
+    if (image) {
+      return {
+        name: `${row.name || row.phone} (campaña)`,
+        send: async () =>
+          (
+            await sendImage({
+              number: row.phone,
+              caption: rendered,
+              buffer: image.data,
+              mimetype: image.mimetype,
+              fileName: image.filename,
+              delayMs,
+            })
+          ).messageId,
+        done: (messageId) => setRecipient(`status = 'sent', message_id = $2, sent_at = $3, error = NULL`, [messageId, nowIso()]),
+        fail: (status, error) => setRecipient(`status = $2, error = $3`, [status, error]),
+      };
+    }
+  }
+
+  return {
+    name: `${row.name || row.phone} (campaña)`,
+    send: async () =>
+      (
+        await sendText({
+          number: row.phone,
+          text: rendered,
+          delayMs,
+        })
+      ).messageId,
+    done: (messageId) => setRecipient(`status = 'sent', message_id = $2, sent_at = $3, error = NULL`, [messageId, nowIso()]),
+    fail: (status, error) => setRecipient(`status = $2, error = $3`, [status, error]),
   };
 }
