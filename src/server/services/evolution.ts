@@ -116,13 +116,17 @@ export async function connectionState(): Promise<string> {
 }
 
 /**
- * Envía la tarjeta con su texto. Durante `delayMs` WhatsApp muestra "escribiendo…" al invitado,
- * como haría una persona, y luego llega el mensaje. Devuelve el id del mensaje de WhatsApp.
+ * Envía una imagen con su texto (la tarjeta de invitación o la imagen de una difusión). Durante `delayMs`
+ * WhatsApp muestra "escribiendo…" al invitado, como haría una persona, y luego llega el mensaje.
+ * Devuelve el id del mensaje de WhatsApp.
  */
 export async function sendImage(opts: {
   number: string;
   caption: string;
+  /** Bytes de la imagen (el nombre viene de la tarjeta PNG; sirve para cualquier formato según `mimetype`). */
   png: Buffer;
+  /** Tipo del archivo. Por defecto PNG (la tarjeta de invitación). */
+  mimetype?: string;
   fileName: string;
   delayMs: number;
 }): Promise<{ messageId: string | null }> {
@@ -132,7 +136,7 @@ export async function sendImage(opts: {
     {
       number: opts.number,
       mediatype: 'image',
-      mimetype: 'image/png',
+      mimetype: opts.mimetype ?? 'image/png',
       caption: opts.caption,
       media: opts.png.toString('base64'),
       fileName: opts.fileName,
