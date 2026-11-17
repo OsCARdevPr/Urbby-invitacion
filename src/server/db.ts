@@ -112,6 +112,10 @@ const migrations: string[] = [
   CREATE INDEX broadcast_recipients_status ON broadcast_recipients(broadcast_id, status);
   CREATE INDEX broadcast_recipients_message ON broadcast_recipients(message_id);
   `,
+  // Difusiones con imagen opcional (el mensaje va como pie). Sin imagen, ambas columnas quedan en NULL.
+  `
+  ALTER TABLE broadcasts ADD COLUMN image bytea, ADD COLUMN image_mime text;
+  `,
 ];
 
 /** Crea o actualiza las tablas. Un candado evita que dos procesos migren a la vez. */

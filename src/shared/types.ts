@@ -129,7 +129,10 @@ export interface BroadcastSummary {
   event_id: number;
   event_name: string;
   audience: BroadcastAudience;
+  /** Puede venir vacío si la difusión lleva imagen. Puede tener spintax: `{Hola|Buenas}`. */
   message: string;
+  /** Lleva imagen: se descarga aparte en GET /broadcasts/:id/image. */
+  has_image: boolean;
   created_at: string;
   total: number;
   queued: number;

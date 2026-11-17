@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/server/config';
 import { sendImage } from '../src/server/services/evolution';
+import { createSchema, decodificarImagen, MAX_IMAGEN_BYTES } from '../src/server/routes/broadcasts';
 import { crc32, detectarTipoImagen, hacerImagenUnica } from '../src/server/services/imagenUnica';
 import { resolverSpintax } from '../src/shared/spintax';
 import { renderTemplate } from '../src/shared/template';
@@ -169,5 +170,30 @@ describe('sendImage con otros formatos', () => {
     expect(messageId).toBe('WAMID2');
     expect(cuerpos[0]).toMatchObject({ mediatype: 'image', mimetype: 'image/jpeg', media: JPEG_JFIF.toString('base64'), fileName: 'foto.jpg' });
     expect(cuerpos[1]).toMatchObject({ mimetype: 'image/png' });
+  });
+});
+
+describe('validación al crear una difusión', () => {
+  const base = { eventId: 1, audience: 'invited' };
+  const png64 = PNG_1x1.toString('base64');
+
+  it('exige mensaje o imagen', () => {
+    expect(createSchema.safeParse({ ...base, message: '  ' }).success).toBe(false);
+    expect(createSchema.safeParse({ ...base, message: 'Hola' }).success).toBe(true);
+    const soloImagen = createSchema.safeParse({ ...base, image: { base64: png64, mime: 'image/png' } });
+    expect(soloImagen.success && soloImagen.data.message).toBe('');
+  });
+
+  it('rechaza tipos que no son JPG, PNG ni WebP', () => {
+    expect(createSchema.safeParse({ ...base, image: { base64: png64, mime: 'image/gif' } }).success).toBe(false);
+  });
+
+  it('confirma la firma del archivo y el tamaño', () => {
+    expect(Buffer.isBuffer(decodificarImagen({ base64: png64, mime: 'image/png' }))).toBe(true);
+    expect(decodificarImagen({ base64: png64, mime: 'image/jpeg' })).toBe('El archivo no es una imagen JPG, PNG o WebP válida');
+    expect(decodificarImagen({ base64: Buffer.from('<svg/>').toString('base64'), mime: 'image/png' })).toMatch(/no es una imagen/);
+    expect(decodificarImagen({ base64: 'no*es*base64', mime: 'image/png' })).toBe('La imagen no se pudo leer');
+    const grande = Buffer.concat([PNG_1x1, Buffer.alloc(MAX_IMAGEN_BYTES)]).toString('base64');
+    expect(decodificarImagen({ base64: grande, mime: 'image/png' })).toBe('La imagen pesa más de 5 MB');
   });
 });
