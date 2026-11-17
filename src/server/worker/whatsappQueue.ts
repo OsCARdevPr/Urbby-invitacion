@@ -3,6 +3,8 @@ import { exec, getEvent, kvGet, kvSet, nowIso, one, query } from '../db';
 import type { GuestRow, WaSettings, WaState, WaStatusResponse } from '../../shared/types';
 import { getCardPng } from '../services/card';
 import { connectionState, EvolutionError, sendImage, sendText } from '../services/evolution';
+import { hacerImagenUnica } from '../services/imagenUnica';
+import { resolverSpintax } from '../../shared/spintax';
 import { renderTemplate, templateVars } from '../../shared/template';
 import {
   DEFAULT_SETTINGS,
@@ -336,13 +338,20 @@ async function nextInvitationJob(eventId: number | null, settings: WaSettings): 
   };
 }
 
-/** El siguiente mensaje de la difusión: solo texto, con los datos del invitado. */
+/** Extensión del archivo según su tipo, para el nombre con el que llega. */
+const EXTENSION: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+/**
+ * El siguiente mensaje de la difusión, con los datos del invitado. Para que ningún envío sea idéntico al
+ * anterior (reduce el riesgo de bloqueo): el destinatario sale en orden al azar, el spintax se resuelve por
+ * persona y, si lleva imagen, cada uno recibe una copia con un metadato propio (otro hash, mismos píxeles).
+ */
 async function nextBroadcastJob(broadcastId: number, settings: WaSettings): Promise<Job | null> {
   const picked = await one<{ guest_id: number }>(
     `UPDATE broadcast_recipients SET status = 'sending'
      WHERE broadcast_id = $1 AND guest_id = (
        SELECT guest_id FROM broadcast_recipients WHERE broadcast_id = $1 AND status = 'queued'
-       ORDER BY guest_id LIMIT 1 FOR UPDATE SKIP LOCKED)
+       ORDER BY random() LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING guest_id`,
     [broadcastId],
   );
@@ -350,8 +359,10 @@ async function nextBroadcastJob(broadcastId: number, settings: WaSettings): Prom
   const setRecipient = (sql: string, params: unknown[]) =>
     exec(`UPDATE broadcast_recipients SET ${sql} WHERE broadcast_id = $1 AND guest_id = $2`, [broadcastId, picked.guest_id, ...params]);
 
-  const row = await one<GuestRow & { message: string }>(
-    `SELECT g.*, b.message FROM guests g JOIN broadcasts b ON b.id = $1 WHERE g.id = $2`,
+  // La imagen (bytea) no se trae aquí: se carga solo al enviar, y solo si la hay.
+  const row = await one<GuestRow & { message: string; image_mime: string | null }>(
+    `SELECT g.*, b.message, CASE WHEN b.image IS NOT NULL THEN b.image_mime END AS image_mime
+     FROM guests g JOIN broadcasts b ON b.id = $1 WHERE g.id = $2`,
     [broadcastId, picked.guest_id],
   );
   const event = row && (await getEvent(row.event_id));
@@ -363,14 +374,24 @@ async function nextBroadcastJob(broadcastId: number, settings: WaSettings): Prom
   }
   return {
     name: `${row.name} (difusión)`,
-    send: async () =>
-      (
-        await sendText({
+    send: async () => {
+      const text = renderTemplate(resolverSpintax(row.message), templateVars(event, row));
+      const delayMs = randInt(settings.typingMinMs, settings.typingMaxMs);
+      if (!row.image_mime) return (await sendText({ number: row.phone!, text, delayMs })).messageId;
+      const img = await one<{ image: Buffer | null }>('SELECT image FROM broadcasts WHERE id = $1', [broadcastId]);
+      if (!img?.image) throw new Error('La imagen de la difusión ya no está disponible');
+      const ext = EXTENSION[row.image_mime] ?? 'jpg';
+      return (
+        await sendImage({
           number: row.phone!,
-          text: renderTemplate(row.message, templateVars(event, row)),
-          delayMs: randInt(settings.typingMinMs, settings.typingMaxMs),
+          caption: text,
+          png: hacerImagenUnica(img.image, row.image_mime),
+          mimetype: row.image_mime,
+          fileName: `IMG-${Date.now().toString(36)}.${ext}`,
+          delayMs,
         })
-      ).messageId,
+      ).messageId;
+    },
     done: (messageId) => setRecipient(`status = 'sent', message_id = $3, sent_at = $4, error = NULL`, [messageId, nowIso()]),
     fail: (status, error) => setRecipient(`status = $3, error = $4`, [status, error]),
   };

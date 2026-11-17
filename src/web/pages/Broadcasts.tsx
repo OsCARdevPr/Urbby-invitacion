@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ChevronDown, ChevronUp, Megaphone, Pause, Play, RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { ChevronDown, ChevronUp, ImagePlus, Megaphone, Pause, Play, RotateCcw, Shuffle, Trash2, X, XCircle } from 'lucide-react';
 import { api, useApi } from '../api';
 import { PageHeader } from '../components/Layout';
 import { waFormat } from '../components/CardPreview';
@@ -8,12 +8,34 @@ import { fmtDateTime, formatPhone, pickCurrentEvent } from '../lib';
 import { useSession } from '../session';
 import type { BroadcastAudience, BroadcastRecipient, BroadcastSummary, EventRow, WaStatusResponse } from '../../shared/types';
 import { AUDIENCE_LABEL, BROADCAST_LABEL } from '../../shared/labels';
+import { resolverSpintax, tieneSpintax } from '../../shared/spintax';
 import { renderTemplate, templateVars } from '../../shared/template';
 
 const SAMPLE_GUEST = { name: 'María José Hernández', business: 'Pupusería La Esquina' };
 const AUDIENCES: BroadcastAudience[] = ['invited', 'not_checked_in', 'checked_in', 'all'];
 
-/** Difusiones: un mensaje de texto por WhatsApp a los invitados de un evento, por la misma cola que las invitaciones. */
+/** Mismos límites que valida el servidor. */
+const TIPOS_IMAGEN = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
+
+/** Imagen elegida para la difusión: el data URL para la vista previa y el base64 que se envía al servidor. */
+interface ImagenElegida {
+  nombre: string;
+  mime: string;
+  dataUrl: string;
+  base64: string;
+}
+
+function leerComoDataUrl(archivo: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onload = () => resolve(String(lector.result));
+    lector.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    lector.readAsDataURL(archivo);
+  });
+}
+
+/** Difusiones: un mensaje por WhatsApp (texto o imagen con pie) a los invitados de un evento, por la misma cola que las invitaciones. */
 export function Broadcasts() {
   const { config } = useSession();
   const list = useApi<BroadcastSummary[]>('/broadcasts', 5000);
@@ -23,7 +45,7 @@ export function Broadcasts() {
     <>
       <PageHeader
         title="Difusiones"
-        subtitle="Un mensaje de texto por WhatsApp a los invitados de un evento. Sale por el mismo número y al mismo ritmo que las invitaciones, y comparte su tope diario."
+        subtitle="Un mensaje por WhatsApp (texto, o imagen con texto) a los invitados de un evento. Sale por el mismo número y al mismo ritmo que las invitaciones, y comparte su tope diario."
       />
 
       {config.localUrl ? (
@@ -68,9 +90,12 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
   const [eventId, setEventId] = useState<number | null>(null);
   const [audience, setAudience] = useState<BroadcastAudience>('invited');
   const [message, setMessage] = useState('');
+  const [imagen, setImagen] = useState<ImagenElegida | null>(null);
+  const [variante, setVariante] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const archivoRef = useRef<HTMLInputElement>(null);
   const counts = useApi<Record<BroadcastAudience, number>>(eventId ? `/broadcasts/audience?eventId=${eventId}` : null);
 
   useEffect(() => {
@@ -81,7 +106,34 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
   const event = events.data?.find((e) => e.id === eventId);
   const recipients = counts.data?.[audience] ?? 0;
   const unknown = [...message.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => !config.placeholders.includes(k));
-  const preview = event && message.trim() ? renderTemplate(message.trim(), templateVars(event, SAMPLE_GUEST)) : '';
+  const conSpintax = tieneSpintax(message);
+  // Una variante al azar del mensaje, como le llegaría a una persona. "Ver otra variante" sortea de nuevo.
+  const preview = useMemo(
+    () => (event && message.trim() ? renderTemplate(resolverSpintax(message.trim()), templateVars(event, SAMPLE_GUEST)) : ''),
+    // `variante` no se usa dentro: solo fuerza otro sorteo.
+    [event, message, variante],
+  );
+
+  async function elegirImagen(e: ChangeEvent<HTMLInputElement>) {
+    const archivo = e.target.files?.[0];
+    e.target.value = '';
+    if (!archivo) return;
+    if (!TIPOS_IMAGEN.includes(archivo.type)) {
+      setError('La imagen debe ser JPG, PNG o WebP.');
+      return;
+    }
+    if (archivo.size > MAX_IMAGEN_BYTES) {
+      setError('La imagen pesa más de 5 MB. Redúcela e inténtalo de nuevo.');
+      return;
+    }
+    try {
+      const dataUrl = await leerComoDataUrl(archivo);
+      setImagen({ nombre: archivo.name, mime: archivo.type, dataUrl, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   function insertPlaceholder(name: string) {
     const el = textRef.current;
@@ -102,8 +154,11 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
     setSaving(true);
     setError(null);
     try {
-      await api<BroadcastSummary>('/broadcasts', { body: { eventId: event.id, audience, message } });
+      await api<BroadcastSummary>('/broadcasts', {
+        body: { eventId: event.id, audience, message, image: imagen ? { base64: imagen.base64, mime: imagen.mime } : undefined },
+      });
       setMessage('');
+      setImagen(null);
       toast('Difusión creada: envíala desde la lista de abajo');
       onCreated();
       void counts.reload();
@@ -159,7 +214,29 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
             <p className="mt-2 text-sm text-ink-mute">Solo cuenta a quienes tienen teléfono y no figuran “Sin WhatsApp”.</p>
           </fieldset>
 
-          <Field label="Mensaje" hint="Solo texto. Los datos entre llaves se llenan con los de cada invitado y del evento.">
+          <Field label="Imagen (opcional)" hint="JPG, PNG o WebP de hasta 5 MB. Si la agregas, el mensaje va como pie de la imagen.">
+            {imagen ? (
+              <div className="flex items-center gap-3 rounded-lg border border-line p-2">
+                <img src={imagen.dataUrl} alt="Imagen elegida" className="size-16 rounded-md object-cover" />
+                <span className="min-w-0 flex-1 truncate text-sm">{imagen.nombre}</span>
+                <Button type="button" variant="ghost" icon={<X className="size-4" />} onClick={() => setImagen(null)}>
+                  Quitar
+                </Button>
+              </div>
+            ) : (
+              <div>
+                <Button type="button" icon={<ImagePlus className="size-4" />} onClick={() => archivoRef.current?.click()}>
+                  Agregar imagen
+                </Button>
+              </div>
+            )}
+            <input ref={archivoRef} type="file" accept={TIPOS_IMAGEN.join(',')} className="hidden" onChange={(e) => void elegirImagen(e)} />
+          </Field>
+
+          <Field
+            label={imagen ? 'Mensaje (opcional)' : 'Mensaje'}
+            hint="Los datos entre llaves se llenan con los de cada invitado y del evento. Con {Hola|Buenas|Qué tal} cada persona recibe una de las opciones al azar."
+          >
             <div className="mb-2 flex flex-wrap gap-2">
               {config.placeholders.map((p) => (
                 <button
@@ -177,11 +254,16 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
               className={`${inputClass} min-h-44 font-mono text-[15px] leading-relaxed`}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              required
+              required={!imagen}
               maxLength={1500}
-              placeholder={'¡Hola {primer_nombre}! Te recordamos que mañana es el {evento} a las {hora} en {lugar}. ¡Te esperamos!'}
+              placeholder={'{Hola|Buenas|Qué tal} {primer_nombre}! Te recordamos que mañana es el {evento} a las {hora} en {lugar}. {¡Te esperamos!|¡Nos vemos!}'}
             />
           </Field>
+          <p className="text-sm text-ink-mute">
+            Variar el texto reduce el riesgo de que WhatsApp lo tome como envío masivo: los mensajes idénticos a muchas personas son de lo
+            que más lo dispara. Además, los destinatarios salen en orden al azar y cada uno recibe la imagen como un archivo distinto (la
+            imagen se ve igual). Ayuda, pero no garantiza que no bloqueen el número.
+          </p>
           {unknown.length ? <Notice tone="warn">No reconozco {unknown.map((u) => `{${u}}`).join(', ')}: se enviaría tal cual.</Notice> : null}
           {/https?:\/\/|www\.|\{mapa\}/i.test(message) ? (
             <Notice tone="warn">El mensaje lleva un enlace: en WhatsApp sube el riesgo de bloqueo del número.</Notice>
@@ -195,7 +277,7 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
           {error ? <Notice tone="bad">{error}</Notice> : null}
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" variant="primary" loading={saving} disabled={!event || !message.trim() || recipients === 0}>
+            <Button type="submit" variant="primary" loading={saving} disabled={!event || (!message.trim() && !imagen) || recipients === 0}>
               {recipients ? `Crear difusión para ${recipients}` : 'Nadie cumple el filtro'}
             </Button>
             {dailyCap ? (
@@ -210,10 +292,23 @@ function NewBroadcast({ dailyCap, onCreated }: { dailyCap?: number; onCreated: (
           <h3 className="mb-2 text-sm font-bold tracking-wide text-ink-mute uppercase">Así le llegará</h3>
           {/* Colores de WhatsApp fijos: es una maqueta del chat, no parte del tema del panel. */}
           <div className="rounded-xl bg-[#efe7dd] p-3">
-            <div className="ml-auto max-w-[92%] rounded-lg rounded-tr-none bg-[#d9fdd3] px-3 py-2 text-[15px] leading-snug whitespace-pre-wrap text-[#111b21] shadow-sm">
-              {preview ? waFormat(preview) : <span className="text-[#667781]">Escribe el mensaje para verlo aquí.</span>}
+            <div className="ml-auto max-w-[92%] overflow-hidden rounded-lg rounded-tr-none bg-[#d9fdd3] text-[15px] leading-snug whitespace-pre-wrap text-[#111b21] shadow-sm">
+              {imagen ? <img src={imagen.dataUrl} alt="" className="block max-h-72 w-full object-cover" /> : null}
+              {preview ? (
+                <div className="px-3 py-2">{waFormat(preview)}</div>
+              ) : imagen ? null : (
+                <div className="px-3 py-2 text-[#667781]">Escribe el mensaje para verlo aquí.</div>
+              )}
             </div>
           </div>
+          {conSpintax ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button type="button" variant="ghost" icon={<Shuffle className="size-4" />} onClick={() => setVariante((v) => v + 1)}>
+                Ver otra variante
+              </Button>
+              <span className="text-sm text-ink-mute">Cada invitado recibe una combinación al azar.</span>
+            </div>
+          ) : null}
         </aside>
       </form>
     </Card>
@@ -261,7 +356,21 @@ function BroadcastCard({ b, wa, onChanged }: { b: BroadcastSummary; wa: WaStatus
           <Badge tone={running ? 'info' : b.queued === 0 ? 'ok' : 'neutral'}>{status}</Badge>
         </div>
 
-        <p className="line-clamp-3 rounded-md bg-surface-2 p-3 text-sm whitespace-pre-wrap">{waFormat(b.message)}</p>
+        <div className="flex gap-3 rounded-md bg-surface-2 p-3">
+          {b.has_image ? (
+            <img
+              src={`/api/broadcasts/${b.id}/image`}
+              alt="Imagen de la difusión"
+              loading="lazy"
+              className="size-16 shrink-0 rounded-md object-cover"
+            />
+          ) : null}
+          {b.message ? (
+            <p className="line-clamp-3 min-w-0 text-sm whitespace-pre-wrap">{waFormat(b.message)}</p>
+          ) : (
+            <p className="text-sm text-ink-mute">Solo imagen, sin texto.</p>
+          )}
+        </div>
 
         <div>
           <div className="mb-1 flex flex-wrap justify-between gap-2 text-sm">

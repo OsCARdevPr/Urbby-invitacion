@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { requireRole, type AppEnv } from '../auth';
 import { exec, getEvent, one, query, tx } from '../db';
 import type { BroadcastAudience, BroadcastRecipient, BroadcastSummary } from '../../shared/types';
+import { detectarTipoImagen, MIMES_IMAGEN, type MimeImagen } from '../services/imagenUnica';
 import { getState, startCampaign, waStatus } from '../worker/whatsappQueue';
 import { firstError, parseId } from './util';
 
-// Difusiones: un mensaje de texto por WhatsApp a los invitados de un evento. Los destinatarios se fijan al
-// crearla; el envío lo hace la misma cola que las invitaciones (mismo número, mismo ritmo, mismo tope).
+// Difusiones: un mensaje por WhatsApp (texto, o imagen con el texto como pie) a los invitados de un evento.
+// Los destinatarios se fijan al crearla; el envío lo hace la misma cola que las invitaciones
+// (mismo número, mismo ritmo, mismo tope).
 
 /**
  * Quiénes del evento reciben cada tipo de difusión. Siempre solo quienes tienen teléfono y no figuran
@@ -22,14 +24,36 @@ const AUDIENCE_SQL: Record<BroadcastAudience, string> = {
 const AUDIENCES = Object.keys(AUDIENCE_SQL) as BroadcastAudience[];
 const audienceWhere = (a: BroadcastAudience) => `event_id = $1 AND phone IS NOT NULL AND wa_status <> 'no_whatsapp' AND ${AUDIENCE_SQL[a]}`;
 
-const createSchema = z.object({
-  eventId: z.number().int().positive(),
-  audience: z.enum(AUDIENCES as [BroadcastAudience, ...BroadcastAudience[]]),
-  message: z.string().trim().min(1, 'Escribe el mensaje').max(1500, 'El mensaje es muy largo'),
+/** Tamaño máximo de la imagen ya decodificada. */
+export const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
+
+const imageSchema = z.object({
+  // En base64 ocupa 4/3 del tamaño real: el tope exacto se revisa al decodificar.
+  base64: z.string().min(1).max(Math.ceil((MAX_IMAGEN_BYTES * 4) / 3) + 4, 'La imagen pesa más de 5 MB'),
+  mime: z.enum(MIMES_IMAGEN as [MimeImagen, ...MimeImagen[]], { error: 'La imagen debe ser JPG, PNG o WebP' }),
 });
+
+export const createSchema = z
+  .object({
+    eventId: z.number().int().positive(),
+    audience: z.enum(AUDIENCES as [BroadcastAudience, ...BroadcastAudience[]]),
+    message: z.string().trim().max(1500, 'El mensaje es muy largo').default(''),
+    image: imageSchema.optional(),
+  })
+  .refine((d) => d.message.length > 0 || Boolean(d.image), { error: 'Escribe el mensaje o agrega una imagen', path: ['message'] });
+
+/** Decodifica la imagen y confirma que sus bytes son del tipo que dice ser. Devuelve el error si no. */
+export function decodificarImagen(img: z.infer<typeof imageSchema>): Buffer | string {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(img.base64)) return 'La imagen no se pudo leer';
+  const buf = Buffer.from(img.base64, 'base64');
+  if (buf.length > MAX_IMAGEN_BYTES) return 'La imagen pesa más de 5 MB';
+  if (detectarTipoImagen(buf) !== img.mime) return 'El archivo no es una imagen JPG, PNG o WebP válida';
+  return buf;
+}
 
 const SUMMARY_SQL = `
   SELECT b.id, b.event_id, e.name AS event_name, b.audience, b.message, b.created_at,
+         (b.image IS NOT NULL)                                                   AS has_image,
          count(r.guest_id)                                                       AS total,
          count(*) FILTER (WHERE r.status IN ('queued', 'sending'))               AS queued,
          count(*) FILTER (WHERE r.status IN ('sent', 'delivered', 'read'))       AS sent,
@@ -68,13 +92,15 @@ export const broadcastRoutes = new Hono<AppEnv>()
   .post('/', async (c) => {
     const parsed = createSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: firstError(parsed.error) }, 400);
-    const { eventId, audience, message } = parsed.data;
+    const { eventId, audience, message, image } = parsed.data;
+    const imagen = image ? decodificarImagen(image) : null;
+    if (typeof imagen === 'string') return c.json({ error: imagen }, 400);
     if (!(await getEvent(eventId))) return c.json({ error: 'Evento no encontrado' }, 404);
 
     const id = await tx(async (client) => {
       const { rows } = await client.query<{ id: number }>(
-        'INSERT INTO broadcasts (event_id, audience, message) VALUES ($1, $2, $3) RETURNING id',
-        [eventId, audience, message],
+        'INSERT INTO broadcasts (event_id, audience, message, image, image_mime) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [eventId, audience, message, imagen, imagen ? image!.mime : null],
       );
       const inserted = await client.query(
         `INSERT INTO broadcast_recipients (broadcast_id, guest_id) SELECT $2::int, id FROM guests WHERE ${audienceWhere(audience)}`,
@@ -88,6 +114,19 @@ export const broadcastRoutes = new Hono<AppEnv>()
     });
     if (id === null) return c.json({ error: 'Nadie del evento cumple ese filtro: la difusión no tendría destinatarios.' }, 400);
     return c.json(await getSummary(id), 201);
+  })
+
+  // La imagen de la difusión, tal como se subió (cada envío lleva además un metadato propio).
+  .get('/:id/image', async (c) => {
+    const row = await one<{ image: Buffer | null; image_mime: string | null }>('SELECT image, image_mime FROM broadcasts WHERE id = $1', [
+      parseId(c.req.param('id')),
+    ]);
+    if (!row?.image || !row.image_mime) return c.json({ error: 'Esta difusión no tiene imagen' }, 404);
+    return c.body(new Uint8Array(row.image), 200, {
+      'Content-Type': row.image_mime,
+      'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+    });
   })
 
   .get('/:id/recipients', async (c) =>
